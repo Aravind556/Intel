@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Tutor - Doubt Solver</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fas fa-graduation-cap"></i> AI Tutor</h1>
+                <p>Your intelligent learning companion</p>
+            </div>
+            <div class="system-status" id="systemStatus">
+                <i class="fas fa-circle status-indicator" id="statusIndicator"></i>
+                <span id="statusText">Checking system...</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- PDF Upload Section -->
+            <section class="pdf-section">
+                <div class="upload-container">
+                    <h2><i class="fas fa-file-pdf"></i> Upload Learning Materials</h2>
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-content">
+                            <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                            <h3>Drag & Drop PDF files here</h3>
+                            <p>or click to browse files</p>
+                            <input type="file" id="pdfFileInput" accept=".pdf" multiple hidden>
+                            <button id="browseBtn" class="btn btn-secondary">
+                                <i class="fas fa-folder-open"></i> Browse Files
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Upload Form -->
+                    <div class="upload-form" id="uploadForm" style="display: none;">
+                        <div class="form-group">
+                            <label for="subjectInput">Subject (Optional)</label>
+                            <input type="text" id="subjectInput" placeholder="e.g., Mathematics, Physics, Chemistry">
+                        </div>
+                        <div class="form-group">
+                            <label for="descriptionInput">Description (Optional)</label>
+                            <textarea id="descriptionInput" placeholder="Brief description of the content..."></textarea>
+                        </div>
+                        <div class="form-actions">
+                            <button id="cancelUploadBtn" class="btn btn-secondary">Cancel</button>
+                            <button id="uploadBtn" class="btn btn-primary">
+                                <i class="fas fa-upload"></i> Upload & Process
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Upload Progress -->
+                    <div class="upload-progress" id="uploadProgress" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <p id="progressText">Uploading...</p>
+                    </div>
+                </div>
+                
+                <!-- PDF List -->
+                <div class="pdf-list-container">
+                    <h3><i class="fas fa-list"></i> Uploaded Documents</h3>
+                    <div class="pdf-list" id="pdfList">
+                        <div class="empty-state" id="emptyState">
+                            <i class="fas fa-book"></i>
+                            <p>No documents uploaded yet. Upload PDF files to get started!</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Question Input Section -->
+            <section class="question-section">
+                <div class="input-container">
+                    <h2><i class="fas fa-question-circle"></i> Ask Your Question</h2>
+                    <div class="question-input-wrapper">
+                        <textarea 
+                            id="questionInput" 
+                            placeholder="Type your question here... (e.g., 'What is calculus?', 'How do I solve quadratic equations?')"
+                            rows="4"
+                        ></textarea>
+                        <div class="input-actions">
+                            <button id="analyzeBtn" class="btn btn-secondary">
+                                <i class="fas fa-search"></i> Analyze Only
+                            </button>
+                            <button id="askBtn" class="btn btn-primary">
+                                <i class="fas fa-paper-plane"></i> Ask Question
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Examples -->
+                <div class="quick-examples">
+                    <h3>Try these examples:</h3>
+                    <div class="example-buttons">
+                        <button class="example-btn" data-question="What is calculus?">
+                            <i class="fas fa-calculator"></i> What is calculus?
+                        </button>
+                        <button class="example-btn" data-question="How do I solve quadratic equations?">
+                            <i class="fas fa-square-root-alt"></i> Solve quadratic equations
+                        </button>
+                        <button class="example-btn" data-question="Explain the concept of derivatives">
+                            <i class="fas fa-chart-line"></i> Explain derivatives
+                        </button>
+                        <button class="example-btn" data-question="Calculate the area under curve y = x^2">
+                            <i class="fas fa-area-chart"></i> Calculate area under curve
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Loading Section -->
+            <section class="loading-section" id="loadingSection" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <p id="loadingText">Processing your question...</p>
+                    <div class="processing-steps" id="processingSteps"></div>
+                </div>
+            </section>
+
+            <!-- Analysis Results Section -->
+            <section class="analysis-section" id="analysisSection" style="display: none;">
+                <h3><i class="fas fa-brain"></i> Question Analysis</h3>
+                <div class="analysis-grid" id="analysisGrid">
+                    <!-- Analysis results will be populated here -->
+                </div>
+            </section>
+
+            <!-- Answer Section -->
+            <section class="answer-section" id="answerSection" style="display: none;">
+                <div class="answer-header">
+                    <h3><i class="fas fa-lightbulb"></i> Answer</h3>
+                    <div class="confidence-badge" id="confidenceBadge">
+                        <i class="fas fa-shield-alt"></i>
+                        <span id="confidenceScore">--</span>% Confidence
+                    </div>
+                </div>
+
+                <!-- Quick Answer -->
+                <div class="quick-answer" id="quickAnswer">
+                    <!-- Quick answer content -->
+                </div>
+
+                <!-- Detailed Explanation -->
+                <div class="detailed-explanation" id="detailedExplanation">
+                    <!-- Detailed explanation content -->
+                </div>
+
+                <!-- Sources -->
+                <div class="sources-section" id="sourcesSection" style="display: none;">
+                    <h4><i class="fas fa-book"></i> Sources</h4>
+                    <div class="sources-list" id="sourcesList">
+                        <!-- Sources will be listed here -->
+                    </div>
+                </div>
+
+                <!-- Next Steps -->
+                <div class="next-steps" id="nextSteps" style="display: none;">
+                    <h4><i class="fas fa-arrow-right"></i> What's Next?</h4>
+                    <div class="next-steps-content">
+                        <div class="related-questions" id="relatedQuestions"></div>
+                        <div class="practice-suggestions" id="practiceSuggestions"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Error Section -->
+            <section class="error-section" id="errorSection" style="display: none;">
+                <div class="error-content">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>Something went wrong</h3>
+                    <p id="errorMessage">Please try again or contact support.</p>
+                    <button id="retryBtn" class="btn btn-primary">
+                        <i class="fas fa-redo"></i> Try Again
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- System Info Panel -->
+        <aside class="info-panel" id="infoPanel">
+            <div class="panel-header">
+                <h3><i class="fas fa-info-circle"></i> System Info</h3>
+                <button id="togglePanel" class="toggle-btn">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+            <div class="panel-content" id="panelContent">
+                <div class="stats-section">
+                    <h4>System Statistics</h4>
+                    <div class="stat-item">
+                        <span class="stat-label">Total PDFs:</span>
+                        <span class="stat-value" id="totalPdfs">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Processed:</span>
+                        <span class="stat-value" id="processedPdfs">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Chunks:</span>
+                        <span class="stat-value" id="totalChunks">--</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/script.js"></script>
+</body>
+</html>
