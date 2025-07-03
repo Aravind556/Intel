@@ -17,7 +17,6 @@ from .models import (
 from .services import (
     PDFTextExtractor,
     EmbeddingGenerator,
-    PDFDatabaseManager, 
     PDFProcessor
 )
 
@@ -33,6 +32,5 @@ __all__ = [
     # Services
     "PDFTextExtractor",
     "EmbeddingGenerator",
-    "PDFDatabaseManager",
     "PDFProcessor"
 ]

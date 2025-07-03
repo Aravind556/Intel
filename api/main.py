@@ -84,21 +84,52 @@ async def get_response_generator():
 async def get_pdf_processor():
     global pdf_processor
     if pdf_processor is None:
+        print("⏳ PDF processor not fully initialized yet. Creating a new instance...")
         pdf_processor = PDFProcessor()
+        print("✅ Created new PDF processor instance")
     return pdf_processor
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup"""
-    global db_config, db_manager, response_generator, pdf_processor
+    global db_config, db_manager, response_generator
     try:
+        print("\n🔄 Initializing database connection...")
         db_config = DatabaseConfig()
+        print("✅ Database config initialized")
+        
+        print("🔄 Setting up database manager...")
         db_manager = PDFDatabaseManager(db_config)
+        print("✅ Database manager ready")
+        
+        print("🔄 Preparing response generator...")
         response_generator = ResponseGenerator(db_manager)
-        pdf_processor = PDFProcessor()
-        print("✅ FastAPI app initialized successfully")
+        print("✅ Response generator ready")
+        
+        # Announce that we're starting server now without waiting for model downloads
+        print("\n🚀 Server is ready - starting now!")
+        print("⏳ Models will continue loading in the background.")
+        print("⚠️ Some features may not be available until model initialization completes.")
+        
+        # Start model initialization in background using a separate thread to avoid blocking
+        import threading
+        thread = threading.Thread(target=lambda: _initialize_models_thread())
+        thread.daemon = True
+        thread.start()
+        
     except Exception as e:
-        print(f"❌ Failed to initialize app: {e}")
+        print(f"\n❌ Failed to initialize app: {str(e)}\n")
+
+def _initialize_models_thread():
+    """Initialize models in the background after server starts (non-async version)"""
+    global pdf_processor
+    try:
+        print("\n🔄 Initializing PDF processor (downloading models in background)...")
+        pdf_processor = PDFProcessor()
+        print("✅ PDF processor initialized")
+        print("\n✅ All components initialized successfully!\n")
+    except Exception as e:
+        print(f"\n❌ Failed to initialize models: {str(e)}\n")
 
 # Health check endpoint
 @app.get("/")

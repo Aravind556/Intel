@@ -1,24 +1,50 @@
 """
 LLM Integration Service
 ======================
-Handles communication with Large Language Models for response generation.
+Handles communication with Large Language Models for response generation using Google Gemini.
 """
 from typing import Dict, Any, List, Optional
-import openai
+import google.generativeai as genai
 import os
 from enum import Enum
+import logging
+
+logger = logging.getLogger(__name__)
 
 class LLMProvider(Enum):
     """Supported LLM providers"""
-    OPENAI_GPT4 = "gpt-4"
-    OPENAI_GPT35 = "gpt-3.5-turbo"
+    GEMINI_FLASH = "gemini-1.5-flash"
+    GEMINI_PRO = "gemini-1.5-pro"
 
 class LLMIntegrator:
-    """Service for integrating with Large Language Models"""
+    """Service for integrating with Google Gemini"""
     
     def __init__(self):
-        self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.default_model = LLMProvider.OPENAI_GPT4
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.default_model = LLMProvider.GEMINI_FLASH
+        self.client = None
+        self._initialize_client()
+    
+    def _initialize_client(self):
+        """Initialize Gemini client."""
+        if not self.api_key:
+            print("\n❌ ERROR: Gemini API key not found in environment variables")
+            print("Please set the GEMINI_API_KEY environment variable")
+            print("LLM integration will be disabled - the system won't be able to respond to questions")
+            logger.warning("Gemini API key not found. LLM integration will be disabled.")
+            return
+            
+        try:
+            print("\n🔄 Initializing Gemini client...")
+            genai.configure(api_key=self.api_key)
+            self.client = genai.GenerativeModel(self.default_model.value)
+            print(f"✅ Gemini client initialized with model {self.default_model.value}")
+            logger.info("Gemini client initialized successfully")
+        except Exception as e:
+            error_msg = f"Failed to initialize Gemini client: {str(e)}"
+            print(f"\n❌ {error_msg}")
+            logger.error(error_msg)
+            self.client = None
     
     async def generate_response(
         self, 
@@ -45,44 +71,58 @@ class LLMIntegrator:
         user_prompt = self._build_user_prompt(question_analysis, context_data)
         
         try:
-            # TEMPORARY: Skip OpenAI API calls due to quota limits
-            # Return mock response for testing
-            mock_response = {
-                "response_text": f"This is a mock response for your question: '{question_analysis.get('question', 'Unknown question')}'. The PDF processing and storage functionality is working correctly. OpenAI API calls are temporarily disabled due to quota limits.",
+            if not self.client:
+                return self._get_fallback_response(question_analysis)
+                
+            # Choose appropriate model based on question complexity
+            model = self._select_model(question_analysis)
+            
+            # Build the prompt
+            system_prompt = self._build_system_prompt(question_analysis, user_preferences)
+            user_prompt = self._build_user_prompt(question_analysis, context_data)
+            
+            full_prompt = f"{system_prompt}\n\nUser Question: {user_prompt}"
+            
+            # Generate response using Gemini
+            response = self.client.generate_content(full_prompt)
+            
+            return {
+                "response_text": response.text,
                 "model_used": model.value,
                 "token_usage": {
-                    "prompt_tokens": 50,
-                    "completion_tokens": 100,
-                    "total_tokens": 150
+                    "prompt_tokens": len(full_prompt.split()),  # Approximate
+                    "completion_tokens": len(response.text.split()),  # Approximate
+                    "total_tokens": len(full_prompt.split()) + len(response.text.split())
                 },
-                "confidence_score": 0.8,
+                "confidence_score": self._calculate_confidence(context_data, question_analysis),
                 "sources_used": self._extract_sources(context_data)
             }
             
-            return mock_response
-            
         except Exception as e:
-            print(f"Error generating LLM response: {e}")
-            return {
-                "response_text": "I apologize, but I'm having trouble generating a response right now. Please try again later.",
-                "model_used": None,
-                "error": str(e),
-                "confidence_score": 0.0,
-                "sources_used": []
-            }
+            logger.error(f"Error generating LLM response: {e}")
+            return self._get_fallback_response(question_analysis)
+    
+    def _get_fallback_response(self, question_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """Fallback response when Gemini is unavailable"""
+        return {
+            "response_text": f"I'm currently unable to process your question: '{question_analysis.get('question', 'Unknown question')}'. Please check the AI service configuration.",
+            "model_used": "fallback",
+            "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "confidence_score": 0.0,
+            "sources_used": []
+        }
     
     def _select_model(self, question_analysis: Dict[str, Any]) -> LLMProvider:
         """Select appropriate model based on question complexity"""
         difficulty = question_analysis.get("difficulty", "intermediate")
         question_type = question_analysis.get("question_type", "conceptual")
         
-        # Use GPT-4 for complex questions, GPT-3.5 for simpler ones
+        # Use Gemini Pro for complex questions, Flash for simpler ones
         if (difficulty == "advanced" or 
-            question_type in ["problem", "procedural"] or
-            question_analysis.get("requires_calculation", False)):
-            return LLMProvider.OPENAI_GPT4
-        else:
-            return LLMProvider.OPENAI_GPT35
+            question_type in ["problem", "procedural"]):
+            return LLMProvider.GEMINI_PRO
+        
+        return LLMProvider.GEMINI_FLASH
     
     def _build_system_prompt(
         self, 

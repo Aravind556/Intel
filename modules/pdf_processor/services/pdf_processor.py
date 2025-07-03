@@ -16,7 +16,7 @@ from ..models.pdf_models import (
 )
 from .text_extractor import PDFTextExtractor
 from .embedding_generator import EmbeddingGenerator
-from .database_manager import PDFDatabaseManager
+from core.database.manager import PDFDatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,11 @@ class PDFProcessor:
     """Main PDF processing pipeline that coordinates all processing steps."""
     
     def __init__(self):
+        from core.database.config import DatabaseConfig
         self.text_extractor = PDFTextExtractor()
         self.embedding_generator = EmbeddingGenerator()
-        self.db_manager = PDFDatabaseManager()
+        db_config = DatabaseConfig()
+        self.db_manager = PDFDatabaseManager(db_config)
     
     async def process_pdf(self, 
                          file_content: bytes,
@@ -55,7 +57,7 @@ class PDFProcessor:
             logger.info(f"📄 Starting PDF processing pipeline for: {original_filename}")
             logger.info(f"📊 File size: {len(file_content)} bytes")
             
-            # Validate file content
+            # Validate file content and size
             if not file_content or len(file_content) == 0:
                 logger.error("❌ Empty file content provided")
                 return ProcessingResponse(
@@ -64,6 +66,31 @@ class PDFProcessor:
                     error=ProcessingError(
                         error_type="VALIDATION_ERROR",
                         error_message="Empty file content"
+                    )
+                )
+            
+            # Check file size limit (50MB)
+            max_file_size = 50 * 1024 * 1024  # 50MB
+            if len(file_content) > max_file_size:
+                logger.error(f"❌ File too large: {len(file_content)} bytes (max: {max_file_size})")
+                return ProcessingResponse(
+                    success=False,
+                    message=f"File too large. Maximum size is {max_file_size // 1024 // 1024}MB",
+                    error=ProcessingError(
+                        error_type="VALIDATION_ERROR",
+                        error_message=f"File size {len(file_content)} exceeds limit {max_file_size}"
+                    )
+                )
+            
+            # Basic PDF format validation
+            if not file_content.startswith(b'%PDF'):
+                logger.error("❌ Invalid PDF format")
+                return ProcessingResponse(
+                    success=False,
+                    message="Invalid PDF format",
+                    error=ProcessingError(
+                        error_type="VALIDATION_ERROR",
+                        error_message="File does not appear to be a valid PDF"
                     )
                 )
             
@@ -82,13 +109,30 @@ class PDFProcessor:
             )
             
             logger.info("💾 Saving initial PDF document record...")
-            # Save initial document record
-            pdf_id = await self.db_manager.save_pdf_document(pdf_doc)
-            logger.info(f"✅ PDF document saved with ID: {pdf_id}")
+            # Save initial document record  
+            try:
+                pdf_record = await self.db_manager.create_pdf_record(
+                    filename=pdf_doc.filename,
+                    original_filename=pdf_doc.original_filename,
+                    subject_id="6866db7e-0acc-43fe-8d02-1069d59a3798",  # Use existing "General" subject
+                    file_path="",  # We're not storing files, just processing them
+                    file_size=pdf_doc.file_size,
+                    total_pages=getattr(pdf_doc, 'total_pages', None),
+                    metadata=getattr(pdf_doc, 'metadata', {})
+                )
+                print(f"DEBUG: pdf_record = {pdf_record}")
+                if pdf_record.get('success'):
+                    pdf_id = pdf_record['data']['id']
+                else:
+                    raise Exception(f"Database operation failed: {pdf_record}")
+                logger.info(f"✅ PDF document saved with ID: {pdf_id}")
+            except Exception as db_error:
+                print(f"DEBUG: Database error: {str(db_error)}")
+                raise db_error
             
             # Update status to processing
             logger.info("🔄 Updating status to PROCESSING...")
-            await self.db_manager.update_pdf_status(pdf_id, ProcessingStatus.PROCESSING)
+            await self.db_manager.update_pdf_processing_status(pdf_id, "processing")
             logger.info("✅ Status updated to PROCESSING")
             
             logger.info(f"🚀 Starting PDF processing for {original_filename} (ID: {pdf_id})")
@@ -109,8 +153,8 @@ class PDFProcessor:
             except Exception as e:
                 error_msg = f"Text extraction failed: {str(e)}"
                 logger.error(f"❌ {error_msg}")
-                await self.db_manager.update_pdf_status(
-                    pdf_id, ProcessingStatus.FAILED, error_message=error_msg
+                await self.db_manager.update_pdf_processing_status(
+                    pdf_id, "failed", error_message=error_msg
                 )
                 return ProcessingResponse(
                     success=False,
@@ -160,7 +204,7 @@ class PDFProcessor:
             # Step 4: Save chunks to database
             logger.info(f"💾 Step 4: Saving {len(pdf_chunks)} chunks to database...")
             try:
-                success = await self.db_manager.save_pdf_chunks(pdf_chunks)
+                success = await self.db_manager.batch_create_chunks(pdf_chunks)
                 if not success:
                     raise ValueError("Failed to save chunks to database")
                 logger.info("✅ Chunks saved to database successfully")
@@ -168,8 +212,8 @@ class PDFProcessor:
             except Exception as e:
                 error_msg = f"Database save failed: {str(e)}"
                 logger.error(f"❌ {error_msg}")
-                await self.db_manager.update_pdf_status(
-                    pdf_id, ProcessingStatus.FAILED, error_message=error_msg
+                await self.db_manager.update_pdf_processing_status(
+                    pdf_id, "failed", error_message=error_msg
                 )
                 return ProcessingResponse(
                     success=False,
@@ -183,8 +227,8 @@ class PDFProcessor:
             
             # Step 5: Update final status
             logger.info("🏁 Step 5: Updating final status to COMPLETED...")
-            await self.db_manager.update_pdf_status(
-                pdf_id, ProcessingStatus.COMPLETED, total_chunks=len(pdf_chunks)
+            await self.db_manager.update_pdf_processing_status(
+                pdf_id, "completed", chunk_count=len(pdf_chunks)
             )
             logger.info("✅ Status updated to COMPLETED")
             
@@ -207,8 +251,8 @@ class PDFProcessor:
             
             # Update status if we have a PDF ID
             if pdf_id:
-                await self.db_manager.update_pdf_status(
-                    pdf_id, ProcessingStatus.FAILED, error_message=error_msg
+                await self.db_manager.update_pdf_processing_status(
+                    pdf_id, "failed", error_message=error_msg
                 )
             
             logger.error(f"PDF processing failed for {original_filename}: {str(e)}")

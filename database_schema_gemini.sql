@@ -1,5 +1,6 @@
 -- AI Tutor Backend - PDF Storage & Vector Database Setup
 -- Supabase + pgvector configuration for LLM data retrieval
+-- UPDATED FOR GEMINI + LOCAL SENTENCE TRANSFORMERS (384 dimensions)
 
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -45,13 +46,14 @@ CREATE TABLE pdf_documents (
 );
 
 -- Document Chunks with Vector Embeddings (Core for LLM retrieval)
+-- UPDATED: Using 384 dimensions for local sentence-transformers (all-MiniLM-L6-v2)
 CREATE TABLE document_chunks (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     pdf_id UUID REFERENCES pdf_documents(id) ON DELETE CASCADE,
     content TEXT NOT NULL, -- Actual text content
     chunk_index INTEGER NOT NULL, -- Order within the document
     page_number INTEGER, -- Which page this chunk came from
-    embedding VECTOR(384), -- Local sentence transformers all-MiniLM-L6-v2 (384 dimensions)
+    embedding VECTOR(384), -- Local sentence-transformers all-MiniLM-L6-v2 (384 dimensions)
     token_count INTEGER, -- Number of tokens in this chunk
     metadata JSONB, -- Additional context
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -88,6 +90,7 @@ CREATE TABLE processing_queue (
 
 -- Create indexes for optimal performance
 -- Vector similarity search index (most important for LLM retrieval)
+-- UPDATED: Using 384 dimensions for local embeddings
 CREATE INDEX idx_document_chunks_embedding 
 ON document_chunks 
 USING ivfflat (embedding vector_cosine_ops) 
@@ -107,6 +110,7 @@ ON document_chunks
 USING gin(to_tsvector('english', content));
 
 -- Vector search function for LLM retrieval
+-- UPDATED: Using 384 dimensions for local sentence-transformers
 CREATE OR REPLACE FUNCTION match_documents_by_subject (
     query_embedding VECTOR(384),
     subject_name VARCHAR(255),
@@ -170,6 +174,7 @@ AS $$
 $$;
 
 -- Function to search within a specific PDF
+-- UPDATED: Using 384 dimensions for local sentence-transformers
 CREATE OR REPLACE FUNCTION search_within_pdf (
     query_embedding VECTOR(384),
     pdf_document_id UUID,
@@ -277,21 +282,20 @@ FOR ALL USING (
 );
 
 -- Insert some sample data for testing (optional)
--- Uncomment below if you want test data
-
-/*
--- Sample user
+-- Sample user for testing (use a real UUID format)
 INSERT INTO users (id, name, email, role) VALUES 
-('550e8400-e29b-41d4-a716-446655440000', 'Test Student', 'student@test.com', 'student');
+('550e8400-e29b-41d4-a716-446655440000', 'Test Student', 'student@test.com', 'student')
+ON CONFLICT (id) DO NOTHING;
 
 -- Sample subjects
 INSERT INTO subjects (id, name, user_id, description) VALUES 
 ('550e8400-e29b-41d4-a716-446655440001', 'Mathematics', '550e8400-e29b-41d4-a716-446655440000', 'Calculus and Algebra'),
-('550e8400-e29b-41d4-a716-446655440002', 'Physics', '550e8400-e29b-41d4-a716-446655440000', 'Mechanics and Thermodynamics');
-*/
+('550e8400-e29b-41d4-a716-446655440002', 'Physics', '550e8400-e29b-41d4-a716-446655440000', 'Mechanics and Thermodynamics'),
+('550e8400-e29b-41d4-a716-446655440003', 'Computer Science', '550e8400-e29b-41d4-a716-446655440000', 'Programming and AI')
+ON CONFLICT (id) DO NOTHING;
 
 -- View to easily see PDF processing status
-CREATE VIEW pdf_processing_overview AS
+CREATE OR REPLACE VIEW pdf_processing_overview AS
 SELECT 
     pd.id,
     pd.original_filename,
@@ -317,8 +321,8 @@ ORDER BY pd.upload_date DESC;
 -- Note: In production, create specific service roles with minimal required permissions
 
 COMMENT ON TABLE pdf_documents IS 'Stores metadata about uploaded PDF files';
-COMMENT ON TABLE document_chunks IS 'Stores text chunks with vector embeddings for LLM retrieval';
+COMMENT ON TABLE document_chunks IS 'Stores text chunks with vector embeddings for LLM retrieval using local sentence-transformers (384 dimensions)';
 COMMENT ON TABLE subjects IS 'Organizes PDFs by academic subjects';
-COMMENT ON INDEX idx_document_chunks_embedding IS 'Vector similarity search index - critical for LLM performance';
+COMMENT ON INDEX idx_document_chunks_embedding IS 'Vector similarity search index for local sentence-transformers - critical for LLM performance';
 
--- Complete! Database is ready for PDF storage and LLM data retrieval
+-- Complete! Database is ready for PDF storage and LLM data retrieval with Gemini + Local Embeddings

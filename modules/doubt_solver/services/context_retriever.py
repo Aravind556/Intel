@@ -5,15 +5,14 @@ Retrieves relevant context from PDF knowledge base using vector search.
 """
 from typing import List, Dict, Any, Optional
 from core.database.manager import PDFDatabaseManager
-import openai
-import os
+from modules.pdf_processor.services.embedding_generator import EmbeddingGenerator
 
 class ContextRetriever:
     """Service for retrieving relevant context from PDF documents"""
     
     def __init__(self, db_manager: PDFDatabaseManager):
         self.db_manager = db_manager
-        self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.embedding_generator = EmbeddingGenerator()
     
     async def get_relevant_context(
         self, 
@@ -69,17 +68,14 @@ class ContextRetriever:
         }
     
     async def _generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for text using OpenAI"""
+        """Generate embedding for text using local sentence transformers"""
         try:
-            response = self.openai_client.embeddings.create(
-                model="text-embedding-ada-002",
-                input=text
-            )
-            return response.data[0].embedding
+            embedding = await self.embedding_generator.generate_single_embedding(text)
+            return embedding if embedding is not None else [0.1] * 384
         except Exception as e:
             print(f"Error generating embedding: {e}")
             # Return dummy embedding as fallback
-            return [0.1] * 1536
+            return [0.1] * 384
     
     async def _search_by_subject(
         self, 

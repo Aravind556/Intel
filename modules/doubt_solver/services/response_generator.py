@@ -123,10 +123,12 @@ class ResponseGenerator:
         
         formatted_response = {
             "answer": {
+                "response_text": response_text,  # Keep original full response
                 "quick_answer": sections.get("quick_answer", ""),
                 "detailed_explanation": sections.get("explanation", response_text),
-                "examples": sections.get("examples", []),
-                "step_by_step": sections.get("steps", [])
+                "examples": sections.get("examples", ""),
+                "step_by_step": sections.get("steps", []),
+                "model_used": llm_response.get("model_used", "unknown")
             },
             "sources": {
                 "primary_sources": llm_response.get("sources_used", []),
