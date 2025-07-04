@@ -130,6 +130,36 @@ class PDFDatabaseManager:
             print(f"Error updating PDF processing status: {e}")
             return False
     
+    async def list_pdf_documents(self, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+        """List PDF documents with pagination"""
+        try:
+            result = self.client.table("pdf_documents").select(
+                "id, filename, original_filename, file_size, total_pages, upload_date, processed, processing_status, chunk_count"
+            ).order("upload_date", desc=True).limit(limit).offset(offset).execute()
+            
+            # Map database fields to expected model fields
+            documents = []
+            for doc in result.data if result.data else []:
+                # Use filename if available, otherwise use original_filename for both fields
+                filename = doc.get('filename') or doc.get('original_filename', 'unknown.pdf')
+                documents.append({
+                    'id': doc.get('id'),
+                    'filename': filename,
+                    'original_filename': doc.get('original_filename', filename),
+                    'file_size': doc.get('file_size', 0),
+                    'total_pages': doc.get('total_pages'),
+                    'upload_timestamp': doc.get('upload_date'),
+                    'processing_status': doc.get('processing_status', 'pending'),
+                    'total_chunks': doc.get('chunk_count', 0),
+                    'processing_error': doc.get('processing_error'),
+                    'metadata': doc.get('metadata', {})
+                })
+            
+            return documents
+        except Exception as e:
+            print(f"Error listing PDF documents: {e}")
+            return []
+    
     # ===== DOCUMENT CHUNKS MANAGEMENT =====
     
     async def create_document_chunk(
@@ -190,8 +220,8 @@ class PDFDatabaseManager:
         try:
             result = self.client.rpc("match_documents_by_subject", {
                 "query_embedding": query_embedding,
-                "subject_name": subject_name,
-                "user_id": user_id,
+                "search_subject_name": subject_name,
+                "search_user_id": user_id,
                 "match_threshold": match_threshold,
                 "match_count": match_count
             }).execute()

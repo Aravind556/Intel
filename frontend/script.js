@@ -178,7 +178,9 @@ class AITutorClient {
 
     async askQuestion() {
         const questionInput = document.getElementById('questionInput');
+        const pdfSelector = document.getElementById('pdfSelector');
         const question = questionInput.value.trim();
+        const selectedPDF = pdfSelector ? pdfSelector.value : null;
         
         if (!question) {
             this.showError('Please enter a question first.');
@@ -188,35 +190,54 @@ class AITutorClient {
         if (this.isProcessing) return;
         
         this.isProcessing = true;
-        this.showLoading('Processing your question...');
+        
+        // Show loading message based on whether a specific PDF is selected
+        const loadingMessage = selectedPDF 
+            ? 'Searching in selected document...' 
+            : 'Processing your question...';
+        this.showLoading(loadingMessage);
         this.hideAllSections();
 
-        const processingSteps = [
-            'Analyzing question...',
-            'Searching knowledge base...',
-            'Generating response...',
-            'Formatting answer...'
-        ];
+        const processingSteps = selectedPDF 
+            ? [
+                'Analyzing question...',
+                'Searching selected document...',
+                'Extracting relevant content...',
+                'Generating response...'
+            ]
+            : [
+                'Analyzing question...',
+                'Searching knowledge base...',
+                'Generating response...',
+                'Formatting answer...'
+            ];
 
         this.showProcessingSteps(processingSteps);
 
         try {
+            const requestBody = {
+                question: question,
+                user_id: null // Using default user for now
+            };
+            
+            // Add document_id if a specific PDF is selected
+            if (selectedPDF) {
+                requestBody.document_id = selectedPDF;
+            }
+
             const response = await fetch(`${this.baseURL}/api/v1/ask`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    question: question,
-                    user_id: null // Using default user for now
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const data = await response.json();
             
             if (response.ok) {
                 this.currentSession = data.session_id;
-                this.displayAnswer(data);
+                this.displayAnswer(data, selectedPDF);
             } else {
                 throw new Error(data.detail || 'Failed to process question');
             }
@@ -306,7 +327,7 @@ class AITutorClient {
         analysisSection.classList.add('fade-in');
     }
 
-    displayAnswer(data) {
+    displayAnswer(data, selectedPDF = null) {
         const answerSection = document.getElementById('answerSection');
         const quickAnswer = document.getElementById('quickAnswer');
         const detailedExplanation = document.getElementById('detailedExplanation');
@@ -330,10 +351,15 @@ class AITutorClient {
             confidenceBadge.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
         }
 
-        // Display quick answer
+        // Display quick answer with document context
         if (data.answer.quick_answer) {
+            const contextInfo = selectedPDF 
+                ? '<div class="document-context"><i class="fas fa-file-pdf"></i> Searched in selected document</div>'
+                : '<div class="document-context"><i class="fas fa-globe"></i> Searched all documents</div>';
+            
             quickAnswer.innerHTML = `
                 <h4><i class="fas fa-zap"></i> Quick Answer</h4>
+                ${contextInfo}
                 <p>${data.answer.quick_answer}</p>
             `;
         }
@@ -592,11 +618,13 @@ class AITutorClient {
         
         if (!pdfs || pdfs.length === 0) {
             emptyState.style.display = 'block';
+            this.populatePDFSelector([]); // Clear selector
             return;
         }
         
         emptyState.style.display = 'none';
         
+        // Populate the PDF list display
         pdfList.innerHTML = pdfs.map(pdf => `
             <div class="pdf-item">
                 <div class="pdf-info">
@@ -620,6 +648,41 @@ class AITutorClient {
                 </div>
             </div>
         `).join('');
+        
+        // Populate the PDF selector dropdown
+        this.populatePDFSelector(pdfs);
+    }
+    
+    populatePDFSelector(pdfs) {
+        const pdfSelector = document.getElementById('pdfSelector');
+        if (!pdfSelector) return;
+        
+        // Clear existing options except the first one
+        pdfSelector.innerHTML = '<option value="">🌐 Search all documents</option>';
+        
+        // Add processed PDFs to the selector
+        const processedPDFs = pdfs.filter(pdf => pdf.processing_status === 'completed');
+        
+        processedPDFs.forEach(pdf => {
+            const option = document.createElement('option');
+            option.value = pdf.id;
+            option.textContent = `📄 ${pdf.original_filename}`;
+            
+            // Add chunk count for user info
+            if (pdf.total_chunks > 0) {
+                option.textContent += ` (${pdf.total_chunks} chunks)`;
+            }
+            
+            pdfSelector.appendChild(option);
+        });
+        
+        // If no processed PDFs, add a disabled option
+        if (processedPDFs.length === 0 && pdfs.length > 0) {
+            const option = document.createElement('option');
+            option.textContent = '⏳ No processed documents yet';
+            option.disabled = true;
+            pdfSelector.appendChild(option);
+        }
     }
 
     async deletePDF(pdfId) {

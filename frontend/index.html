@@ -82,6 +82,22 @@
             <section class="question-section">
                 <div class="input-container">
                     <h2><i class="fas fa-question-circle"></i> Ask Your Question</h2>
+                    
+                    <!-- PDF Selection for Document-Specific Questions -->
+                    <div class="pdf-selector-wrapper">
+                        <label for="pdfSelector">
+                            <i class="fas fa-file-pdf"></i> Ask about a specific document (optional)
+                        </label>
+                        <select id="pdfSelector" class="pdf-selector">
+                            <option value="">🌐 Search all documents</option>
+                            <!-- PDF options will be populated dynamically -->
+                        </select>
+                        <div class="selector-info">
+                            <i class="fas fa-info-circle"></i>
+                            <span>Select a document to ask questions only about that PDF, or leave as "all documents" to search everything</span>
+                        </div>
+                    </div>
+                    
                     <div class="question-input-wrapper">
                         <textarea 
                             id="questionInput" 

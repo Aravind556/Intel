@@ -18,7 +18,8 @@ class ContextRetriever:
         self, 
         question_analysis: Dict[str, Any], 
         user_id: str,
-        max_chunks: int = 5
+        max_chunks: int = 5,
+        document_id: str = None
     ) -> Dict[str, Any]:
         """
         Retrieve relevant context for answering a question
@@ -27,6 +28,7 @@ class ContextRetriever:
             question_analysis: Output from QuestionProcessor
             user_id: User ID for filtering content
             max_chunks: Maximum number of context chunks to retrieve
+            document_id: Optional specific document ID to search within
             
         Returns:
             Dictionary containing relevant context and metadata
@@ -39,21 +41,32 @@ class ContextRetriever:
         
         # Retrieve context based on different strategies
         context_chunks = []
+        search_strategies_used = []
         
-        # Strategy 1: Subject-specific search
-        if subject:
+        # Strategy 1: Document-specific search (if document_id provided)
+        if document_id:
+            document_chunks = await self._search_within_document(
+                question_embedding, document_id, max_chunks
+            )
+            context_chunks.extend(document_chunks)
+            search_strategies_used.append("document_specific")
+        
+        # Strategy 2: Subject-specific search (if no document or not enough results)
+        if not document_id and subject:
             subject_chunks = await self._search_by_subject(
                 question_embedding, subject, user_id, max_chunks
             )
             context_chunks.extend(subject_chunks)
+            search_strategies_used.append("vector_similarity")
         
-        # Strategy 2: Cross-subject search if not enough results
-        if len(context_chunks) < max_chunks:
+        # Strategy 3: Cross-subject search if not enough results
+        if len(context_chunks) < max_chunks and not document_id:
             remaining_count = max_chunks - len(context_chunks)
             general_chunks = await self._search_general(
                 question_embedding, user_id, remaining_count
             )
             context_chunks.extend(general_chunks)
+            search_strategies_used.append("cross_subject")
         
         # Rank and filter context
         ranked_context = self._rank_context_relevance(
@@ -63,7 +76,7 @@ class ContextRetriever:
         return {
             "context_chunks": ranked_context[:max_chunks],
             "total_found": len(context_chunks),
-            "search_strategies_used": self._get_search_strategies(subject),
+            "search_strategies_used": search_strategies_used if search_strategies_used else self._get_search_strategies(subject),
             "context_summary": self._summarize_context(ranked_context[:max_chunks])
         }
     
@@ -71,11 +84,30 @@ class ContextRetriever:
         """Generate embedding for text using local sentence transformers"""
         try:
             embedding = await self.embedding_generator.generate_single_embedding(text)
-            return embedding if embedding is not None else [0.1] * 384
+            return embedding if embedding is not None else [0.1] * 768
         except Exception as e:
             print(f"Error generating embedding: {e}")
             # Return dummy embedding as fallback
-            return [0.1] * 384
+            return [0.1] * 768
+    
+    async def _search_within_document(
+        self, 
+        query_embedding: List[float], 
+        document_id: str, 
+        count: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Search within a specific document"""
+        try:
+            results = await self.db_manager.search_within_pdf(
+                query_embedding=query_embedding,
+                pdf_id=document_id,
+                match_threshold=0.3,  # Lower threshold for document-specific search
+                match_count=count
+            )
+            return results
+        except Exception as e:
+            print(f"Error in document-specific search: {e}")
+            return []
     
     async def _search_by_subject(
         self, 

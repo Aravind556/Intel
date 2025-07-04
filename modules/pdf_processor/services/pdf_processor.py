@@ -204,9 +204,24 @@ class PDFProcessor:
             # Step 4: Save chunks to database
             logger.info(f"💾 Step 4: Saving {len(pdf_chunks)} chunks to database...")
             try:
-                success = await self.db_manager.batch_create_chunks(pdf_chunks)
-                if not success:
-                    raise ValueError("Failed to save chunks to database")
+                # Convert PDFChunk objects to dictionaries for database insertion
+                # Only include fields that exist in the database schema
+                chunk_dicts = []
+                for chunk in pdf_chunks:
+                    chunk_dict = {
+                        "pdf_id": chunk.pdf_id,
+                        "content": chunk.content,
+                        "chunk_index": chunk.chunk_index,
+                        "page_number": chunk.page_number,
+                        "embedding": chunk.embedding,
+                        "token_count": len(chunk.content.split()) if chunk.content else 0,  # Approximate token count
+                        "metadata": chunk.metadata or {}
+                    }
+                    chunk_dicts.append(chunk_dict)
+                
+                success = await self.db_manager.batch_create_chunks(chunk_dicts)
+                if not success.get('success', False):
+                    raise ValueError(f"Failed to save chunks to database: {success.get('error', 'Unknown error')}")
                 logger.info("✅ Chunks saved to database successfully")
                     
             except Exception as e:

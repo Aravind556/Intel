@@ -95,17 +95,39 @@ async def test_question_answering(document_id, question="Summarize the main poin
         answer = await response_generator.solve_doubt(
             question=question,
             user_id=user_id,
-            session_id=session_id
+            session_id=session_id,
+            document_id=document_id
         )
         
         # Display results
         print(f"✅ Question Answering Complete")
-        if isinstance(answer, dict) and 'answer' in answer:
-            print(f"   - Answer: {answer['answer'][:150]}...")  # Show first 150 chars
-        else:
-            print(f"   - Answer: {str(answer)[:150]}...")  # Show first 150 chars of whatever we got
         
-        if answer.get('sources'):
+        # Debug: Print the answer structure
+        print(f"DEBUG: answer type = {type(answer)}")
+        print(f"DEBUG: answer = {answer}")
+        
+        if isinstance(answer, dict):
+            if 'answer' in answer and isinstance(answer['answer'], dict):
+                # New format: answer.answer.response_text
+                if 'response_text' in answer['answer']:
+                    response_text = answer['answer']['response_text'][:150]
+                    print(f"   - Answer: {response_text}...")
+                else:
+                    print(f"   - Answer structure: {list(answer['answer'].keys())}")
+            elif 'answer' in answer:
+                # Old format: answer.answer (direct string)
+                print(f"   - Answer: {str(answer['answer'])[:150]}...")
+            else:
+                print(f"   - No 'answer' key found. Keys: {list(answer.keys())}")
+                # Try to find response in other common keys
+                if 'llm_response' in answer:
+                    llm_resp = answer['llm_response']
+                    if isinstance(llm_resp, dict) and 'response_text' in llm_resp:
+                        print(f"   - LLM Response: {llm_resp['response_text'][:150]}...")
+        else:
+            print(f"   - Raw answer: {str(answer)[:150]}...")
+        
+        if isinstance(answer, dict) and answer.get('sources'):
             print(f"   - Sources: {len(answer['sources'])} chunks referenced")
         
         return answer

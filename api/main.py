@@ -42,6 +42,7 @@ class QuestionRequest(BaseModel):
     question: str
     user_id: Optional[str] = None
     session_id: Optional[str] = None
+    document_id: Optional[str] = None
 
 class QuestionResponse(BaseModel):
     success: bool
@@ -167,7 +168,8 @@ async def ask_question(
         result = await response_gen.solve_doubt(
             question=request.question,
             user_id=user_id,
-            session_id=request.session_id
+            session_id=request.session_id,
+            document_id=request.document_id
         )
         
         if result.get("success", False):

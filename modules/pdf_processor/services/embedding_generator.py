@@ -1,8 +1,8 @@
 """
-PDF Embedding Generator with Google Text Embeddings API
+PDF Embedding Generator with Ollama Local Embeddings
 
-Handles generation of vector embeddings for PDF text chunks using Google's embedding API.
-Uses batching and parallel processing for improved efficiency.
+Handles generation of vector embeddings for PDF text chunks using Ollama local models.
+No API rate limits, completely free and local processing.
 """
 
 import logging
@@ -10,44 +10,54 @@ from typing import List, Optional
 import os
 import asyncio
 import numpy as np
-import google.generativeai as genai
+import ollama
 from ..models.pdf_models import ProcessingError
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingGenerator:
-    """Generates vector embeddings for text chunks using Google's text embeddings API."""
+    """Generates vector embeddings for text chunks using Ollama local models."""
     
     def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        self.model_name = "models/text-embedding-004"  # Latest model
-        self.max_batch_size = 50  # Increased for better performance
-        self.max_parallel_requests = 10  # More parallel requests
-        self.request_delay = 0.1  # Reduced delay between batches
+        self.model_name = "nomic-embed-text"  # Ollama embedding model
+        self.max_batch_size = 100  # Much higher since it's local
+        self.max_parallel_requests = 20  # Higher parallelization for local processing
+        self.request_delay = 0.01  # Minimal delay for local processing
         self.model = None
         self._initialize_model()
     
     def _initialize_model(self):
-        """Initialize Google embedding API client."""
+        """Initialize Ollama client and pull embedding model."""
         try:
-            if not self.api_key:
-                print("\n❌ ERROR: Google API key not found in environment variables")
-                print("Please set the GEMINI_API_KEY environment variable")
-                print("Embeddings will not be available - PDFs can be uploaded but not searched")
-                logger.warning("Google API key not found. Embedding generation will be disabled.")
+            print("\n🔄 Initializing Ollama local embeddings...")
+            
+            # Check if Ollama is running
+            try:
+                models = ollama.list()
+                print("✅ Ollama is running")
+            except Exception as e:
+                print(f"❌ Ollama not running. Please start Ollama first: {e}")
+                logger.error(f"Ollama not running: {e}")
                 return
-                
-            print("\n🔄 Initializing Google Text Embeddings API client...")
-            genai.configure(api_key=self.api_key)
-            # No actual model object needed, just configure the API
-            self.model = True  # Just a flag to indicate API is ready
-            print("✅ Google Text Embeddings API initialized successfully!")
-            logger.info("Google Text Embeddings API initialized successfully")
+            
+            # Check if embedding model is available
+            available_models = [model.model for model in models.models]
+            if self.model_name not in available_models:
+                print(f"🔄 Pulling embedding model: {self.model_name}")
+                ollama.pull(self.model_name)
+                print(f"✅ Model {self.model_name} downloaded")
+            else:
+                print(f"✅ Model {self.model_name} already available")
+            
+            self.model = True  # Flag to indicate Ollama is ready
+            print("✅ Ollama embeddings initialized successfully!")
+            logger.info("Ollama embeddings initialized successfully")
             
         except Exception as e:
-            error_msg = f"Failed to initialize embedding API: {str(e)}"
+            error_msg = f"Failed to initialize Ollama: {str(e)}"
             print(f"❌ {error_msg}")
+            logger.error(error_msg)
             logger.error(error_msg)
             logger.error(error_msg)
             self.model = None
@@ -63,7 +73,7 @@ class EmbeddingGenerator:
             List of chunks with 'embedding' field added
         """
         if not self.model:
-            logger.warning("Google Text Embeddings API not available. Skipping embedding generation.")
+            logger.warning("Ollama not available. Skipping embedding generation.")
             # Return chunks without embeddings
             for chunk in chunks:
                 chunk["embedding"] = None
@@ -74,7 +84,7 @@ class EmbeddingGenerator:
             result_chunks = chunks.copy()
             total_chunks = len(chunks)
             
-            print(f"⏳ Generating embeddings for {total_chunks} chunks using Google Text Embeddings API...")
+            print(f"⏳ Generating embeddings for {total_chunks} chunks using Ollama local embeddings...")
             print(f"📊 Using batch size: {self.max_batch_size}, parallel requests: {self.max_parallel_requests}")
             
             # Split into optimized batches
@@ -156,11 +166,11 @@ class EmbeddingGenerator:
             return chunks
     
     async def _generate_batch_embeddings_async(self, texts: List[str]) -> List[Optional[List[float]]]:
-        """Generate embeddings for a batch of texts asynchronously using Google Text Embeddings API."""
-        return self._generate_batch_embeddings(texts)  # Use the sync method for now
+        """Generate embeddings for a batch of texts asynchronously using Ollama."""
+        return self._generate_batch_embeddings(texts)  # Ollama is already async-friendly
     
     def _generate_batch_embeddings(self, texts: List[str]) -> List[Optional[List[float]]]:
-        """Generate embeddings for a batch of texts using Google Text Embeddings API."""
+        """Generate embeddings for a batch of texts using Ollama."""
         try:
             if not self.model:
                 return [None] * len(texts)
@@ -169,21 +179,20 @@ class EmbeddingGenerator:
             cleaned_texts = []
             for text in texts:
                 cleaned_text = " ".join(text.split())
-                if len(cleaned_text) > 2000:  # API limit is about 2048 tokens
-                    cleaned_text = cleaned_text[:2000]
+                if len(cleaned_text) > 8000:  # Ollama can handle longer texts
+                    cleaned_text = cleaned_text[:8000]
                 cleaned_texts.append(cleaned_text)
             
-            # Generate embeddings using Google API
+            # Generate embeddings using Ollama
             embeddings = []
             for text in cleaned_texts:
                 try:
-                    result = genai.embed_content(
+                    response = ollama.embeddings(
                         model=self.model_name,
-                        content=text,
-                        task_type="retrieval_document"
+                        prompt=text
                     )
-                    if result and hasattr(result, "embedding"):
-                        embeddings.append(result.embedding)
+                    if response and 'embedding' in response:
+                        embeddings.append(response['embedding'])
                     else:
                         embeddings.append(None)
                 except Exception as e:
@@ -204,17 +213,16 @@ class EmbeddingGenerator:
         try:
             # Clean text
             cleaned_text = " ".join(text.split())
-            if len(cleaned_text) > 2000:
-                cleaned_text = cleaned_text[:2000]
+            if len(cleaned_text) > 8000:
+                cleaned_text = cleaned_text[:8000]
             
-            result = genai.embed_content(
+            response = ollama.embeddings(
                 model=self.model_name,
-                content=cleaned_text,
-                task_type="retrieval_query"
+                prompt=cleaned_text
             )
             
-            if result and hasattr(result, "embedding"):
-                return result.embedding
+            if response and 'embedding' in response:
+                return response['embedding']
             return None
             
         except Exception as e:
