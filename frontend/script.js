@@ -1,12 +1,101 @@
-// AI Tutor Frontend JavaScript
+/**
+ * AI Tutor Frontend Application
+ * Enhanced with authentication support
+ */
 
-class AITutorClient {
+class AITutorApp {
     constructor() {
         this.baseURL = window.location.origin;
-        this.currentSession = null;
-        this.isProcessing = false;
+        this.systemStatus = 'unknown';
+        this.uploadedFiles = [];
+        this.availableDocuments = [];
+        this.selectedDocumentId = null;
         
-        this.init();
+        // Authentication - now session-based
+        this.user = null;
+        
+        this.initializeApp();
+    }
+
+    async initializeApp() {
+        console.log('🚀 Initializing AI Tutor App...');
+        
+        // Check authentication status
+        await this.checkAuthState();
+        
+        // Initialize event listeners
+        this.initializeEventListeners();
+        
+        // Check system status
+        await this.checkSystemStatus();
+        
+        // Load available documents
+        await this.loadPDFList();
+        
+        console.log('✅ AI Tutor App initialized successfully');
+    }
+
+    async checkAuthState() {
+        try {
+            // Check if user is logged in by trying to get profile
+            const response = await fetch(`${this.baseURL}/api/v1/auth/profile`, {
+                method: 'GET',
+                credentials: 'include' // Include session cookie
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    this.user = result.user;
+                }
+            }
+        } catch (error) {
+            console.log('No active session');
+            this.user = null;
+        }
+        
+        this.updateAuthUI();
+    }
+
+    updateAuthUI() {
+        const userInfo = document.getElementById('userInfo');
+        const authButtons = document.getElementById('authButtons');
+        const userName = document.getElementById('userName');
+        
+        if (this.user) {
+            userName.textContent = `Welcome, ${this.user.name}`;
+            userInfo.style.display = 'flex';
+            authButtons.style.display = 'none';
+        } else {
+            userInfo.style.display = 'none';
+            authButtons.style.display = 'flex';
+        }
+    }
+
+    async handleLogout() {
+        try {
+            await fetch(`${this.baseURL}/api/v1/auth/logout`, {
+                method: 'POST',
+                credentials: 'include' // Include session cookie
+            });
+        } catch (error) {
+            console.error('Logout error:', error);
+        } finally {
+            this.user = null;
+            this.updateAuthUI();
+            this.showSuccess('Logged out successfully');
+        }
+    }
+
+    initializeEventListeners() {
+        // Logout button
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => this.handleLogout());
+        }
+        
+        // Call the existing setup method
+        this.setupEventListeners();
     }
 
     init() {
@@ -124,6 +213,37 @@ class AITutorClient {
             console.error('Health check failed:', error);
             statusIndicator.className = 'fas fa-circle status-indicator offline';
             statusText.textContent = 'System Offline';
+        }
+    }
+
+    async checkSystemStatus() {
+        try {
+            // Add timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+            
+            const response = await fetch(`${this.baseURL}/health`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            const data = await response.json();
+            
+            if (response.ok && data.status === 'healthy') {
+                this.systemStatus = 'online';
+                console.log('✅ System status: Online');
+            } else {
+                this.systemStatus = 'degraded';
+                console.log('⚠️ System status: Degraded');
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log('⏰ System check timed out');
+            } else {
+                console.log('❌ System check error:', error);
+            }
+            this.systemStatus = 'offline';
+            console.log('❌ System status: Offline');
         }
     }
 
@@ -388,7 +508,7 @@ class AITutorClient {
             relatedQuestions.innerHTML = `
                 <h5><i class="fas fa-question"></i> Related Questions</h5>
                 ${data.next_steps.related_questions.map(q => 
-                    `<div class="suggestion-item" onclick="tutorClient.askRelatedQuestion('${q}')">${q}</div>`
+                    `<div class="suggestion-item" onclick="window.tutorClient.askRelatedQuestion('${q}')">${q}</div>`
                 ).join('')}
             `;
         }
@@ -602,13 +722,32 @@ class AITutorClient {
     }
 
     async loadPDFList() {
+        console.log('📋 Loading PDF list...');
         try {
-            const response = await fetch(`${this.baseURL}/api/v1/pdfs`);
+            // Add timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            
+            const response = await fetch(`${this.baseURL}/api/v1/pdfs`, {
+                credentials: 'include', // Include session cookie
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            console.log('📋 PDF list response status:', response.status);
+            
             const pdfs = await response.json();
+            console.log('📋 PDF list data:', pdfs);
             
             this.displayPDFList(pdfs);
         } catch (error) {
-            console.error('Failed to load PDF list:', error);
+            if (error.name === 'AbortError') {
+                console.log('⏰ PDF list load timed out');
+            } else {
+                console.error('Failed to load PDF list:', error);
+            }
+            // Show empty state if loading fails
+            this.displayPDFList([]);
         }
     }
 
@@ -642,7 +781,7 @@ class AITutorClient {
                     ${pdf.processing_status}
                 </div>
                 <div class="pdf-actions">
-                    <button class="delete-btn" onclick="tutorClient.deletePDF('${pdf.id}')">
+                    <button class="delete-btn" onclick="window.tutorClient.deletePDF('${pdf.id}')">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -721,7 +860,7 @@ class AITutorClient {
 
 // Initialize the application when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    window.tutorClient = new AITutorClient();
+    window.tutorClient = new AITutorApp();
     
     // Add some helpful console messages
     console.log('🎓 AI Tutor Frontend Loaded');

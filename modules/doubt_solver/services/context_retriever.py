@@ -46,7 +46,7 @@ class ContextRetriever:
         # Strategy 1: Document-specific search (if document_id provided)
         if document_id:
             document_chunks = await self._search_within_document(
-                question_embedding, document_id, max_chunks
+                question_embedding, document_id, user_id, max_chunks
             )
             context_chunks.extend(document_chunks)
             search_strategies_used.append("document_specific")
@@ -94,17 +94,31 @@ class ContextRetriever:
         self, 
         query_embedding: List[float], 
         document_id: str, 
+        user_id: str,
         count: int = 5
     ) -> List[Dict[str, Any]]:
-        """Search within a specific document"""
+        """Search within a specific document with stricter relevance filtering"""
         try:
             results = await self.db_manager.search_within_pdf(
                 query_embedding=query_embedding,
                 pdf_id=document_id,
-                match_threshold=0.3,  # Lower threshold for document-specific search
+                user_id=user_id,
+                match_threshold=0.5,  # Higher threshold for document-specific search
                 match_count=count
             )
-            return results
+            
+            # Additional filtering: only return chunks with meaningful similarity
+            filtered_results = []
+            for result in results:
+                similarity = result.get("similarity", 0)
+                content = result.get("content", "").strip()
+                
+                # Be more strict about what constitutes relevant content
+                if similarity > 0.4 and len(content) > 30:
+                    filtered_results.append(result)
+            
+            return filtered_results
+            
         except Exception as e:
             print(f"Error in document-specific search: {e}")
             return []

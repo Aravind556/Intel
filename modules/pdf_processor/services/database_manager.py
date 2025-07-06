@@ -22,27 +22,27 @@ class PDFDatabaseManager:
         # Use service client to bypass RLS for PDF processing
         self.client = self.db_config.service_client
     
-    async def save_pdf_document(self, pdf_doc: PDFDocument) -> str:
+    async def save_pdf_document(self, pdf_doc: PDFDocument, user_id: Optional[str] = None) -> str:
         """
-        Save PDF document metadata to database.
+        Save PDF document metadata to database with user-specific storage.
         
         Args:
             pdf_doc: PDFDocument instance
+            user_id: User ID for user-specific storage
             
         Returns:
             PDF document ID
         """
         try:
-            logger.info(f"💾 Starting to save PDF document: {pdf_doc.original_filename}")
+            logger.info(f"💾 Starting to save PDF document: {pdf_doc.original_filename} for user: {user_id}")
             
             # Generate ID if not provided
             if not pdf_doc.id:
                 pdf_doc.id = str(uuid.uuid4())
                 logger.info(f"🔧 Generated new PDF ID: {pdf_doc.id}")
             
-            # Create or get a default subject for general uploads
-            logger.info(f"🔍 Getting or creating subject: {pdf_doc.subject or 'General'}")
-            subject_id = await self._get_or_create_default_subject(pdf_doc.subject or "General")
+            # Get or create subject with user context
+            subject_id = await self._get_or_create_subject_for_user(pdf_doc.subject or "General", user_id)
             logger.info(f"✅ Subject ID: {subject_id}")
             
             # Map to existing database schema
@@ -61,7 +61,8 @@ class PDFDatabaseManager:
                 "metadata": {
                     **(pdf_doc.metadata or {}),
                     "subject": pdf_doc.subject,
-                    "description": pdf_doc.description
+                    "description": pdf_doc.description,
+                    "user_id": user_id  # Store user_id in metadata for reference
                 }
             }
             
@@ -71,7 +72,7 @@ class PDFDatabaseManager:
             # Insert into database using Supabase service client
             result = self.client.table("pdf_documents").insert(doc_data).execute()
             
-            logger.info(f"✅ Saved PDF document {pdf_doc.filename} with ID {pdf_doc.id}")
+            logger.info(f"✅ Saved PDF document {pdf_doc.filename} with ID {pdf_doc.id} for user {user_id}")
             logger.debug(f"Database response: {result.data if result.data else 'No data returned'}")
             return pdf_doc.id
             
@@ -79,22 +80,23 @@ class PDFDatabaseManager:
             logger.error(f"❌ Failed to save PDF document: {str(e)}")
             raise
     
-    async def _get_or_create_default_subject(self, subject_name: str) -> str:
-        """Get or create a default subject for PDF uploads."""
+    async def _get_or_create_subject_for_user(self, subject_name: str, user_id: Optional[str]) -> str:
+        """Get or create a subject for a specific user."""
         try:
-            # First, try to get or create a default user for system uploads
-            default_user_id = await self._get_or_create_system_user()
+            if not user_id:
+                # Fallback to system user for backward compatibility
+                user_id = await self._get_or_create_system_user()
             
             # Check if subject already exists for this user
-            result = self.client.table("subjects").select("id").eq("user_id", default_user_id).eq("name", subject_name).execute()
+            result = self.client.table("subjects").select("id").eq("user_id", user_id).eq("name", subject_name).execute()
             
             if result.data:
                 return result.data[0]["id"]
             
-            # Create new subject
+            # Create new subject for the user
             subject_data = {
                 "name": subject_name,
-                "user_id": default_user_id,
+                "user_id": user_id,
                 "description": f"Auto-created subject for {subject_name} uploads",
                 "color": "#6366f1"  # Default color
             }
@@ -103,7 +105,7 @@ class PDFDatabaseManager:
             return result.data[0]["id"]
             
         except Exception as e:
-            logger.error(f"Failed to create subject: {str(e)}")
+            logger.error(f"Failed to create subject for user: {str(e)}")
             # Return a hardcoded UUID as fallback (this might fail due to FK constraint)
             return "00000000-0000-0000-0000-000000000000"
     

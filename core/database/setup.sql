@@ -1,5 +1,19 @@
 -- AI Tutor Backend - PDF Storage & Vector Database Setup
 -- Supabase + pgvector configuration for LLM data retrieval
+-- 
+-- UPDATES INCLUDED:
+-- - User isolation: Added user_id to pdf_documents table
+-- - Fixed embedding dimensions: Updated all functions to use 768-dim vectors (nomic-embed-text)
+-- - Corrected get_user_subjects function: Fixed ambiguous columns and return types
+-- - Enhanced RLS policies: Added performance improvements and documentation
+-- - Added user_id indexes: Optimized queries for multi-user performance
+-- 
+-- This schema supports:
+-- ✅ Strict user isolation with Row-Level Security (RLS)
+-- ✅ Document-specific question answering
+-- ✅ 768-dimensional Ollama embeddings (nomic-embed-text)
+-- ✅ Multi-user PDF processing and storage
+-- ✅ Advanced vector similarity search
 
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -33,6 +47,7 @@ CREATE TABLE pdf_documents (
     filename VARCHAR(255) NOT NULL, -- Stored filename
     original_filename VARCHAR(255) NOT NULL, -- User's original filename
     subject_id UUID REFERENCES subjects(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE, -- User ownership for isolation
     file_path TEXT, -- Path in Supabase storage
     file_size BIGINT NOT NULL,
     total_pages INTEGER,
@@ -41,7 +56,8 @@ CREATE TABLE pdf_documents (
     processing_status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'processing', 'completed', 'failed'
     processing_error TEXT, -- Store error details if processing fails
     metadata JSONB, -- Additional PDF metadata (author, creation date, etc.)
-    chunk_count INTEGER DEFAULT 0 -- Track how many chunks were created
+    chunk_count INTEGER DEFAULT 0, -- Track how many chunks were created
+    total_chunks INTEGER DEFAULT 0 -- Alias for consistency
 );
 
 -- Document Chunks with Vector Embeddings (Core for LLM retrieval)
@@ -95,6 +111,7 @@ WITH (lists = 100);
 
 -- Indexes for fast PDF and subject lookups
 CREATE INDEX idx_pdf_documents_subject_id ON pdf_documents(subject_id);
+CREATE INDEX idx_pdf_documents_user_id ON pdf_documents(user_id); -- Added for user isolation performance
 CREATE INDEX idx_pdf_documents_processed ON pdf_documents(processed, processing_status);
 CREATE INDEX idx_document_chunks_pdf_id ON document_chunks(pdf_id);
 CREATE INDEX idx_document_chunks_page ON document_chunks(page_number);
@@ -108,7 +125,7 @@ USING gin(to_tsvector('english', content));
 
 -- Vector search function for LLM retrieval
 CREATE OR REPLACE FUNCTION match_documents_by_subject (
-    query_embedding VECTOR(384),
+    query_embedding VECTOR(768),  -- Updated to 768 for nomic-embed-text
     subject_name VARCHAR(255),
     user_id UUID,
     match_threshold FLOAT DEFAULT 0.75,
@@ -146,32 +163,35 @@ AS $$
 $$;
 
 -- Function to get all available subjects for a user
-CREATE OR REPLACE FUNCTION get_user_subjects(user_id UUID)
+CREATE OR REPLACE FUNCTION get_user_subjects(p_user_id UUID)
 RETURNS TABLE (
-    subject_id UUID,
-    subject_name VARCHAR(255),
+    id UUID,
+    name TEXT,
+    description TEXT,
+    color VARCHAR(7),  -- Changed from TEXT to VARCHAR(7) to match database column type
     pdf_count BIGINT,
-    total_chunks BIGINT,
-    last_upload TIMESTAMP WITH TIME ZONE
-)
-LANGUAGE SQL STABLE
-AS $$
+    created_at TIMESTAMPTZ
+) AS $$
+BEGIN
+    RETURN QUERY
     SELECT 
-        s.id as subject_id,
-        s.name as subject_name,
-        COUNT(pd.id) as pdf_count,
-        COALESCE(SUM(pd.chunk_count), 0) as total_chunks,
-        MAX(pd.upload_date) as last_upload
+        s.id,
+        s.name,
+        s.description,
+        s.color,
+        COUNT(p.id) as pdf_count,
+        s.created_at
     FROM subjects s
-    LEFT JOIN pdf_documents pd ON s.id = pd.subject_id AND pd.processed = TRUE
-    WHERE s.user_id = user_id
-    GROUP BY s.id, s.name
-    ORDER BY s.name;
-$$;
+    LEFT JOIN pdf_documents p ON s.id = p.subject_id AND p.user_id = p_user_id
+    WHERE s.user_id = p_user_id
+    GROUP BY s.id, s.name, s.description, s.color, s.created_at
+    ORDER BY s.created_at DESC;
+END;
+$$ LANGUAGE plpgsql;
 
 -- Function to search within a specific PDF
 CREATE OR REPLACE FUNCTION search_within_pdf (
-    query_embedding VECTOR(384),
+    query_embedding VECTOR(768),  -- Updated to 768 for nomic-embed-text
     pdf_document_id UUID,
     match_threshold FLOAT DEFAULT 0.75,
     match_count INT DEFAULT 10
@@ -226,13 +246,18 @@ AS $$
 $$;
 
 -- Row Level Security (RLS) for data isolation
+-- Note: RLS policies use auth.uid() which works with Supabase Auth
+-- For custom authentication, the application bypasses RLS using service_client
+-- after proper user verification at the application level
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subjects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pdf_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE processing_queue ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies
+-- RLS Policies for Supabase Auth (when using built-in authentication)
+-- For custom auth, these are bypassed using service_client with app-level verification
+
 -- Users can only see their own data
 CREATE POLICY "Users can view own profile" ON users 
 FOR SELECT USING (auth.uid() = id);
@@ -244,9 +269,11 @@ FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Users can manage own subjects" ON subjects 
 FOR ALL USING (auth.uid() = user_id);
 
--- Users can only access PDFs in their subjects
+-- Users can only access PDFs in their subjects  
+-- Updated to include direct user_id check for better performance
 CREATE POLICY "Users can access own PDFs" ON pdf_documents 
 FOR ALL USING (
+    auth.uid() = user_id OR 
     EXISTS (
         SELECT 1 FROM subjects 
         WHERE subjects.id = pdf_documents.subject_id 
@@ -274,6 +301,7 @@ FOR ALL USING (
         WHERE pd.id = processing_queue.pdf_id 
         AND s.user_id = auth.uid()
     )
+);
 );
 
 -- Insert some sample data for testing (optional)

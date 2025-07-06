@@ -36,7 +36,8 @@ class PDFProcessor:
                          original_filename: str,
                          subject: Optional[str] = None,
                          description: Optional[str] = None,
-                         metadata: Optional[Dict[str, Any]] = None) -> ProcessingResponse:
+                         metadata: Optional[Dict[str, Any]] = None,
+                         user_id: Optional[str] = None) -> ProcessingResponse:
         """
         Process a PDF file through the complete pipeline.
         
@@ -46,6 +47,7 @@ class PDFProcessor:
             subject: Subject category (optional)
             description: Description of the PDF content (optional)
             metadata: Additional metadata (optional)
+            user_id: User ID for user-specific storage (required for new user-specific model)
             
         Returns:
             ProcessingResponse with results and status
@@ -109,23 +111,48 @@ class PDFProcessor:
             )
             
             logger.info("💾 Saving initial PDF document record...")
-            # Save initial document record  
+            # Save initial document record with user-specific access
             try:
+                # Get or create subject for the user
+                if user_id:
+                    subject_name = subject or "General"
+                    user_subject = await self.db_manager.get_subject_by_name(user_id, subject_name)
+                    if not user_subject:
+                        # Create subject for the user
+                        subject_result = await self.db_manager.create_subject(
+                            user_id=user_id,
+                            name=subject_name,
+                            description=f"Auto-created subject for {subject_name} uploads"
+                        )
+                        if subject_result.get('success'):
+                            subject_id = subject_result['data']['id']
+                        else:
+                            raise Exception(f"Failed to create subject: {subject_result}")
+                    else:
+                        subject_id = user_subject['id']
+                else:
+                    # Fallback to system user (for backward compatibility)
+                    subject_id = "6866db7e-0acc-43fe-8d02-1069d59a3798"  # Use existing "General" subject
+                
+                # Store user_id in metadata for the PDF document
+                metadata_with_user = {**(metadata or {}), "user_id": user_id} if user_id else (metadata or {})
+                
                 pdf_record = await self.db_manager.create_pdf_record(
                     filename=pdf_doc.filename,
                     original_filename=pdf_doc.original_filename,
-                    subject_id="6866db7e-0acc-43fe-8d02-1069d59a3798",  # Use existing "General" subject
+                    subject_id=subject_id,
                     file_path="",  # We're not storing files, just processing them
                     file_size=pdf_doc.file_size,
                     total_pages=getattr(pdf_doc, 'total_pages', None),
-                    metadata=getattr(pdf_doc, 'metadata', {})
+                    metadata=metadata_with_user,
+                    user_id=user_id  # Pass user_id to database manager
                 )
                 print(f"DEBUG: pdf_record = {pdf_record}")
                 if pdf_record.get('success'):
                     pdf_id = pdf_record['data']['id']
                 else:
                     raise Exception(f"Database operation failed: {pdf_record}")
-                logger.info(f"✅ PDF document saved with ID: {pdf_id}")
+                logger.info(f"✅ PDF document saved with ID: {pdf_id} for user: {user_id}")
             except Exception as db_error:
                 print(f"DEBUG: Database error: {str(db_error)}")
                 raise db_error
@@ -283,21 +310,21 @@ class PDFProcessor:
                 )
             )
     
-    async def get_pdf_info(self, pdf_id: str) -> Optional[PDFDocument]:
-        """Get information about a processed PDF."""
-        return await self.db_manager.get_pdf_document(pdf_id)
+    async def get_pdf_info(self, pdf_id: str, user_id: Optional[str] = None) -> Optional[PDFDocument]:
+        """Get information about a processed PDF - user-specific access."""
+        return await self.db_manager.get_pdf_document(pdf_id, user_id=user_id)
     
-    async def list_pdfs(self, limit: int = 50, offset: int = 0):
-        """List processed PDFs with pagination."""
-        return await self.db_manager.list_pdf_documents(limit, offset)
+    async def list_pdfs(self, limit: int = 50, offset: int = 0, user_id: Optional[str] = None):
+        """List PDFs with user-specific filtering."""
+        return await self.db_manager.list_pdf_documents(limit=limit, offset=offset, user_id=user_id)
     
-    async def get_processing_stats(self) -> Dict[str, Any]:
-        """Get processing statistics."""
-        return await self.db_manager.get_processing_stats()
+    async def get_processing_stats(self, user_id: Optional[str] = None):
+        """Get processing statistics - user-specific."""
+        return await self.db_manager.get_processing_stats(user_id=user_id)
     
-    async def delete_pdf(self, pdf_id: str) -> bool:
-        """Delete a PDF and all its chunks."""
-        return await self.db_manager.delete_pdf_document(pdf_id)
+    async def delete_pdf(self, pdf_id: str, user_id: Optional[str] = None) -> bool:
+        """Delete a PDF and all its chunks - user-specific access."""
+        return await self.db_manager.delete_pdf_document(pdf_id, user_id=user_id)
     
     def _generate_filename(self, original_filename: str) -> str:
         """Generate a unique filename for storage."""
