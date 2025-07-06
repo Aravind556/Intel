@@ -1,40 +1,155 @@
-# AI Tutor Backend - PDF Storage & Vector Database Requirements
+# AI Tutor Backend - Core Requirements
+# Minimal dependencies based on actual code usage
 
-# Core Framework
-fastapi>=0.100.0
-uvicorn>=0.20.0
+# =============================================================================
+# CORE DEPENDENCIES (Required for basic functionality)
+# =============================================================================
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
 
 # Database & Vector Storage  
-supabase>=2.0.0
-# psycopg2-binary>=2.9.5  # Skip for now, will use supabase client only
-# pgvector>=0.2.0  # Skip for now, pgvector is enabled in Supabase directly
+supabase>=2.1.0
+
+# AI Integration
+google-generativeai>=0.3.2  # Gemini LLM
+ollama>=0.5.0  # Local embeddings
 
 # Environment & Configuration
 python-dotenv>=1.0.0
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
 
 # PDF Processing
-PyPDF2>=3.0.0
-pdfplumber>=0.9.0
-python-multipart>=0.0.5
-
-# AI & Embeddings
-openai>=1.0.0
-tiktoken>=0.5.0
-
-# Async Support
-aiofiles>=0.20.0
-httpx>=0.25.0
+PyPDF2>=3.0.1
+pdfplumber>=0.10.3
 
 # Data Processing
-numpy>=1.20.0
-pandas>=1.5.0
+numpy>=1.24.0
 
 # Utilities
-python-slugify>=8.0.0
-pillow>=10.0.0
+psutil>=5.9.6  # For performance monitoring
 
-# Development & Testing
-pytest>=7.0.0
-pytest-asyncio>=0.20.0
+# =============================================================================
+# TESTING DEPENDENCIES (For test scripts)
+# =============================================================================
+
+requests>=2.31.0  # For API testing scripts
+reportlab>=4.0.4  # For test PDF generation
+
+# =============================================================================
+# OPTIONAL DEPENDENCIES (Install as needed)
+# =============================================================================
+
+# Development & Testing Tools
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0
+# pytest-cov>=4.1.0
+# black>=23.0.0
+# isort>=5.12.0
+# flake8>=6.1.0
+# mypy>=1.7.0
+
+# Production Deployment
+# gunicorn>=21.2.0
+# docker>=6.1.0
+# redis>=5.0.1
+
+# Enhanced PDF Processing
+# pymupdf>=1.23.8  # Alternative PDF processing (fitz)
+# tesseract>=5.3.0  # OCR for scanned PDFs (system install required)
+# pytesseract>=0.3.10  # Python wrapper for tesseract
+# pdf2image>=1.16.3  # Convert PDF to images for OCR
+
+# Alternative Vector Databases
+# chromadb>=0.4.15
+# pinecone-client>=2.2.4
+# weaviate-client>=3.25.0
+
+# Alternative LLM Providers
+# openai>=1.3.0  # OpenAI GPT models
+# anthropic>=0.7.0  # Claude models
+# langchain>=0.0.350  # LangChain integration
+
+# Alternative Embedding Models
+# sentence-transformers>=2.2.2  # Local sentence transformers
+# transformers>=4.30.0  # Hugging Face transformers
+# torch>=2.0.0  # PyTorch for local models
+
+# Additional Authentication (if needed)
+# PyJWT>=2.8.0
+# python-jose[cryptography]>=3.3.0
+# passlib[bcrypt]>=1.7.4
+# cryptography>=41.0.7
+
+# Enhanced HTTP & Async
+# aiofiles>=23.2.0
+# httpx>=0.25.2
+# aiohttp>=3.9.0
+
+# Text Processing & NLP
+# nltk>=3.8.1  # For text preprocessing
+# tiktoken>=0.5.2  # For token counting
+# python-slugify>=8.0.0
+# tqdm>=4.66.0
+# rich>=13.7.0
+
+# Monitoring & Logging
+# structlog>=23.2.0
+# prometheus-client>=0.19.0
+
+# Background Processing
+# celery>=5.3.0
+# flower>=2.0.1
+
+# =============================================================================
+# INSTALLATION NOTES
+# =============================================================================
+
+# Quick Start (Core functionality):
+# pip install -r requirements.txt
+
+# Development Setup:
+# pip install -r requirements.txt
+# pip install pytest black isort flake8 mypy
+
+# Production Setup:
+# pip install -r requirements.txt
+# pip install gunicorn
+
+# Ollama Setup (after pip install):
+# 1. Install Ollama: https://ollama.ai/download
+# 2. Start service: ollama serve
+# 3. Pull embedding model: ollama pull nomic-embed-text
+
+# Supabase Setup:
+# 1. Create project at https://supabase.com
+# 2. Run setup.sql to create tables and functions
+# 3. Add credentials to .env file
+
+# Version Requirements:
+# - Python 3.8+
+# - FastAPI 0.104+ for latest features
+# - Supabase 2.1+ for vector operations
+# - Ollama 0.5+ for nomic-embed-text model
+
+# =============================================================================
+# ARCHITECTURE NOTES
+# =============================================================================
+
+# This AI Tutor backend uses:
+# - FastAPI for web framework
+# - Supabase for database and vector storage with RLS
+# - Ollama for local embeddings (nomic-embed-text model)
+# - Google Gemini for LLM responses
+# - Simple authentication system (no JWT)
+# - Strict document-only mode for question answering
+# - User isolation with row-level security
+
+# Key Features:
+# - User-specific PDF storage and access
+# - Document-specific question answering
+# - No general knowledge leakage
+# - Comprehensive test coverage
+# - Development and production ready
+
+# =============================================================================

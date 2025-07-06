@@ -25,7 +25,8 @@ class ResponseGenerator:
         question: str, 
         user_id: str,
         user_preferences: Dict[str, Any] = None,
-        session_id: str = None
+        session_id: str = None,
+        document_id: str = None
     ) -> Dict[str, Any]:
         """
         Complete doubt-solving pipeline
@@ -35,6 +36,7 @@ class ResponseGenerator:
             user_id: User identifier
             user_preferences: User's learning preferences
             session_id: Optional session ID for tracking
+            document_id: Optional specific document ID to search within
             
         Returns:
             Complete response with answer, sources, and metadata
@@ -64,7 +66,7 @@ class ResponseGenerator:
             # Step 2: Retrieve relevant context
             response_data["processing_steps"].append("context_retrieval")
             context_data = await self.context_retriever.get_relevant_context(
-                question_analysis, user_id
+                question_analysis, user_id, document_id=document_id
             )
             response_data["context_data"] = context_data
             
@@ -123,10 +125,12 @@ class ResponseGenerator:
         
         formatted_response = {
             "answer": {
+                "response_text": response_text,  # Keep original full response
                 "quick_answer": sections.get("quick_answer", ""),
                 "detailed_explanation": sections.get("explanation", response_text),
-                "examples": sections.get("examples", []),
-                "step_by_step": sections.get("steps", [])
+                "examples": sections.get("examples", ""),
+                "step_by_step": sections.get("steps", []),
+                "model_used": llm_response.get("model_used", "unknown")
             },
             "sources": {
                 "primary_sources": llm_response.get("sources_used", []),

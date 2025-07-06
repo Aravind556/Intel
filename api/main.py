@@ -1,9 +1,9 @@
 """
 FastAPI main application
 """
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Header, Cookie
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
@@ -15,6 +15,7 @@ from core.database.manager import PDFDatabaseManager
 from modules.doubt_solver.services.response_generator import ResponseGenerator
 from modules.pdf_processor.services.pdf_processor import PDFProcessor
 from modules.pdf_processor.models.pdf_models import ProcessingResponse, PDFDocument
+from simple_auth import SimpleAuth
 
 app = FastAPI(
     title="AI Tutor Backend",
@@ -36,12 +37,29 @@ db_config = None
 db_manager = None
 response_generator = None
 pdf_processor = None
+auth_system = SimpleAuth()
+
+# Authentication Models
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: str = "student"
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 # Request/Response Models
 class QuestionRequest(BaseModel):
     question: str
     user_id: Optional[str] = None
     session_id: Optional[str] = None
+    document_id: Optional[str] = None
 
 class QuestionResponse(BaseModel):
     success: bool
@@ -64,6 +82,24 @@ class SubjectCreateRequest(BaseModel):
     description: str = ""
     color: str = "#3B82F6"
 
+# Authentication Models
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: str = "student"
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+class SessionRequest(BaseModel):
+    session_id: str
+
 # Dependency to get database manager
 async def get_db_manager():
     global db_config, db_manager
@@ -84,21 +120,74 @@ async def get_response_generator():
 async def get_pdf_processor():
     global pdf_processor
     if pdf_processor is None:
+        print("⏳ PDF processor not fully initialized yet. Creating a new instance...")
         pdf_processor = PDFProcessor()
+        print("✅ Created new PDF processor instance")
     return pdf_processor
+
+# Authentication dependency
+async def get_current_user(session_id: Optional[str] = Cookie(None)):
+    """Get current user from session cookie"""
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    user_data = await auth_system.get_user_from_session(session_id)
+    
+    if not user_data:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    
+    return user_data
+
+# Optional authentication (for endpoints that work with or without auth)
+async def get_current_user_optional(session_id: Optional[str] = Cookie(None)):
+    """Get current user if session exists, otherwise return None"""
+    if not session_id:
+        return None
+    
+    user_data = await auth_system.get_user_from_session(session_id)
+    return user_data
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup"""
-    global db_config, db_manager, response_generator, pdf_processor
+    global db_config, db_manager, response_generator
     try:
+        print("\n🔄 Initializing database connection...")
         db_config = DatabaseConfig()
+        print("✅ Database config initialized")
+        
+        print("🔄 Setting up database manager...")
         db_manager = PDFDatabaseManager(db_config)
+        print("✅ Database manager ready")
+        
+        print("🔄 Preparing response generator...")
         response_generator = ResponseGenerator(db_manager)
-        pdf_processor = PDFProcessor()
-        print("✅ FastAPI app initialized successfully")
+        print("✅ Response generator ready")
+        
+        # Announce that we're starting server now without waiting for model downloads
+        print("\n🚀 Server is ready - starting now!")
+        print("⏳ Models will continue loading in the background.")
+        print("⚠️ Some features may not be available until model initialization completes.")
+        
+        # Start model initialization in background using a separate thread to avoid blocking
+        import threading
+        thread = threading.Thread(target=lambda: _initialize_models_thread())
+        thread.daemon = True
+        thread.start()
+        
     except Exception as e:
-        print(f"❌ Failed to initialize app: {e}")
+        print(f"\n❌ Failed to initialize app: {str(e)}\n")
+
+def _initialize_models_thread():
+    """Initialize models in the background after server starts (non-async version)"""
+    global pdf_processor
+    try:
+        print("\n🔄 Initializing PDF processor (downloading models in background)...")
+        pdf_processor = PDFProcessor()
+        print("✅ PDF processor initialized")
+        print("\n✅ All components initialized successfully!\n")
+    except Exception as e:
+        print(f"\n❌ Failed to initialize models: {str(e)}\n")
 
 # Health check endpoint
 @app.get("/")
@@ -107,7 +196,15 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Simple health check endpoint"""
+    return {
+        "status": "healthy",
+        "message": "AI Tutor Backend is running"
+    }
+
+@app.get("/api/v1/system/status")
+async def get_detailed_system_status():
+    """Get detailed system status with database stats"""
     try:
         db_mgr = await get_db_manager()
         stats = await db_mgr.get_processing_stats()
@@ -117,26 +214,33 @@ async def health_check():
             "stats": stats
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+        return {
+            "status": "partial",
+            "database": "error",
+            "error": str(e),
+            "stats": {"total_pdfs": 0, "processed_pdfs": 0}
+        }
 
 # Doubt Solver Endpoints
 @app.post("/api/v1/ask", response_model=QuestionResponse)
 async def ask_question(
     request: QuestionRequest,
-    response_gen: ResponseGenerator = Depends(get_response_generator)
+    response_gen: ResponseGenerator = Depends(get_response_generator),
+    current_user: dict = Depends(get_current_user)
 ):
     """
-    Ask a question to the AI tutor
+    Ask a question to the AI tutor - user-specific access
     """
     try:
-        # Use default user ID if not provided
-        user_id = request.user_id or "550e8400-e29b-41d4-a716-446655440000"
+        # Use authenticated user's ID
+        user_id = current_user["user_id"]
         
         # Generate response
         result = await response_gen.solve_doubt(
             question=request.question,
             user_id=user_id,
-            session_id=request.session_id
+            session_id=request.session_id,
+            document_id=request.document_id
         )
         
         if result.get("success", False):
@@ -270,49 +374,20 @@ async def get_system_stats(db_mgr: PDFDatabaseManager = Depends(get_db_manager))
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
 
 # PDF Processing Endpoints
-@app.post("/api/v1/process-pdf")
-async def process_pdf(
-    file: UploadFile = File(...),
-    user_id: str = Form(...),
-    db_mgr: PDFDatabaseManager = Depends(get_db_manager),
-    pdf_proc: PDFProcessor = Depends(get_pdf_processor)
-):
-    """Get system health and status"""
-    try:
-        db_mgr = await get_db_manager()
-        pdf_proc = await get_pdf_processor()
-        
-        # Check database connection
-        try:
-            stats = await pdf_proc.get_processing_stats()
-            db_status = "connected"
-        except Exception:
-            stats = {"total_pdfs": 0, "processed_pdfs": 0, "processing_pdfs": 0, 
-                    "failed_pdfs": 0, "total_chunks": 0, "avg_chunks_per_pdf": 0}
-            db_status = "disconnected"
-        
-        return {
-            "status": "healthy",
-            "database": db_status,
-            "stats": stats
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
-
-# PDF Processing Endpoints
 @app.post("/api/v1/pdfs/upload")
 async def upload_pdf(
     file: UploadFile = File(...),
     subject: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
-    pdf_proc: PDFProcessor = Depends(get_pdf_processor)
+    pdf_proc: PDFProcessor = Depends(get_pdf_processor),
+    current_user: dict = Depends(get_current_user)
 ) -> ProcessingResponse:
-    """Upload and process a PDF file"""
+    """Upload and process a PDF file - user-specific storage"""
     import logging
     logger = logging.getLogger(__name__)
     
     try:
-        logger.info(f"🚀 Received PDF upload request: {file.filename}")
+        logger.info(f"🚀 Received PDF upload request from user {current_user['user_id']}: {file.filename}")
         logger.info(f"📊 File size: {file.size} bytes")
         logger.info(f"📝 Subject: {subject}, Description: {description}")
         
@@ -332,13 +407,14 @@ async def upload_pdf(
         file_content = await file.read()
         logger.info(f"✅ Read {len(file_content)} bytes from file")
         
-        # Process the PDF
+        # Process the PDF with user context
         logger.info("🔄 Starting PDF processing pipeline...")
         result = await pdf_proc.process_pdf(
             file_content=file_content,
             original_filename=file.filename,
             subject=subject,
-            description=description
+            description=description,
+            user_id=current_user["user_id"]  # Pass user ID for user-specific storage
         )
         
         logger.info(f"✅ PDF processing completed: {result.success}")
@@ -356,32 +432,39 @@ async def upload_pdf(
 async def list_pdfs(
     limit: int = 50,
     offset: int = 0,
-    pdf_proc: PDFProcessor = Depends(get_pdf_processor)
+    pdf_proc: PDFProcessor = Depends(get_pdf_processor),
+    current_user: dict = Depends(get_current_user)
 ) -> List[PDFDocument]:
-    """List processed PDFs with pagination"""
+    """List processed PDFs with pagination - user-specific access"""
     try:
-        return await pdf_proc.list_pdfs(limit=limit, offset=offset)
+        return await pdf_proc.list_pdfs(
+            limit=limit, 
+            offset=offset, 
+            user_id=current_user["user_id"]  # Use user_id key from session
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list PDFs: {str(e)}")
 
 @app.get("/api/v1/pdfs/stats")
 async def get_pdf_stats(
-    pdf_proc: PDFProcessor = Depends(get_pdf_processor)
+    pdf_proc: PDFProcessor = Depends(get_pdf_processor),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get PDF processing statistics"""
+    """Get PDF processing statistics - user-specific"""
     try:
-        return await pdf_proc.get_processing_stats()
+        return await pdf_proc.get_processing_stats(user_id=current_user["user_id"])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
 
 @app.get("/api/v1/pdfs/{pdf_id}")
 async def get_pdf(
     pdf_id: str,
-    pdf_proc: PDFProcessor = Depends(get_pdf_processor)
+    pdf_proc: PDFProcessor = Depends(get_pdf_processor),
+    current_user: dict = Depends(get_current_user)
 ) -> PDFDocument:
-    """Get information about a specific PDF"""
+    """Get information about a specific PDF - user-specific access"""
     try:
-        pdf_doc = await pdf_proc.get_pdf_info(pdf_id)
+        pdf_doc = await pdf_proc.get_pdf_info(pdf_id, user_id=current_user["user_id"])
         if not pdf_doc:
             raise HTTPException(status_code=404, detail="PDF not found")
         return pdf_doc
@@ -393,11 +476,12 @@ async def get_pdf(
 @app.delete("/api/v1/pdfs/{pdf_id}")
 async def delete_pdf(
     pdf_id: str,
-    pdf_proc: PDFProcessor = Depends(get_pdf_processor)
+    pdf_proc: PDFProcessor = Depends(get_pdf_processor),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Delete a PDF and all its chunks"""
+    """Delete a PDF and all its chunks - user-specific access"""
     try:
-        success = await pdf_proc.delete_pdf(pdf_id)
+        success = await pdf_proc.delete_pdf(pdf_id, user_id=current_user["user_id"])
         if not success:
             raise HTTPException(status_code=404, detail="PDF not found or could not be deleted")
         return {"message": "PDF deleted successfully"}
@@ -406,19 +490,177 @@ async def delete_pdf(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete PDF: {str(e)}")
 
-# Serve static files (for the frontend)
+@app.post("/api/v1/auth/register")
+async def register_user(request: RegisterRequest, response: Response):
+    """Register a new user"""
+    try:
+        result = await auth_system.register_user(
+            name=request.name,
+            email=request.email,
+            password=request.password,
+            role=request.role
+        )
+        
+        if result["success"]:
+            # Set session cookie for auto-login after registration
+            response.set_cookie(
+                key="session_id",
+                value=result["session_id"],
+                httponly=True,
+                secure=False,  # Set to True in production with HTTPS
+                samesite="lax"
+            )
+            return {
+                "success": True,
+                "message": result["message"],
+                "user": result["user"]
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result["error"])
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+@app.post("/api/v1/auth/login")
+async def login_user(request: LoginRequest, response: Response):
+    """Login user"""
+    try:
+        result = await auth_system.login_user(request.email, request.password)
+        
+        if result["success"]:
+            # Set session cookie
+            response.set_cookie(
+                key="session_id",
+                value=result["session_id"],
+                httponly=True,
+                secure=False,  # Set to True in production with HTTPS
+                samesite="lax"
+            )
+            return {
+                "success": True,
+                "message": result["message"],
+                "user": result["user"]
+            }
+        else:
+            raise HTTPException(status_code=401, detail=result["error"])
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+@app.post("/api/v1/auth/logout")
+async def logout_user(response: Response, session_id: Optional[str] = Cookie(None)):
+    """Logout user"""
+    try:
+        if session_id:
+            result = await auth_system.logout_user(session_id)
+            # Clear session cookie
+            response.delete_cookie(key="session_id")
+            
+            if result["success"]:
+                return {"success": True, "message": result["message"]}
+            else:
+                return {"success": True, "message": "Logged out"}
+        else:
+            return {"success": True, "message": "No active session"}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Logout failed: {str(e)}")
+
+@app.get("/api/v1/auth/profile")
+async def get_user_profile(current_user = Depends(get_current_user)):
+    """Get current user profile"""
+    return {"success": True, "user": current_user}
+
+@app.post("/api/v1/auth/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    session_id: Optional[str] = Cookie(None)
+):
+    """Change user password"""
+    try:
+        if not session_id:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+            
+        result = await auth_system.change_password(
+            session_id=session_id,
+            old_password=request.old_password,
+            new_password=request.new_password
+        )
+        
+        if result["success"]:
+            return {"success": True, "message": result["message"]}
+        else:
+            raise HTTPException(status_code=400, detail=result["error"])
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Password change failed: {str(e)}")
+
+# Static file serving - only mount if directory exists
 if os.path.exists("frontend"):
     app.mount("/static", StaticFiles(directory="frontend"), name="static")
-    
-    @app.get("/frontend", response_class=HTMLResponse)
-    async def serve_frontend():
-        """Serve the frontend HTML"""
-        try:
-            with open("frontend/index.html", "r", encoding="utf-8") as f:
-                return HTMLResponse(content=f.read())
-        except FileNotFoundError:
-            return HTMLResponse(content="<h1>Frontend not found</h1><p>Please create the frontend files.</p>")
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Redirect to frontend"""
+    return HTMLResponse("""
+    <html>
+        <head>
+            <title>AI Tutor</title>
+            <meta http-equiv="refresh" content="0; url=/frontend/auth.html">
+        </head>
+        <body>
+            <p>Redirecting to AI Tutor...</p>
+        </body>
+    </html>
+    """)
+
+@app.get("/frontend/auth.html", response_class=HTMLResponse)
+async def auth_page():
+    """Serve authentication page"""
+    try:
+        with open("frontend/auth.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Authentication page not found")
+
+@app.get("/frontend/index.html", response_class=HTMLResponse)
+async def app_page():
+    """Serve main application page"""
+    try:
+        with open("frontend/index.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Application page not found")
+
+@app.get("/frontend/{path:path}")
+async def frontend_files(path: str):
+    """Serve frontend static files"""
+    try:
+        # Handle empty path (directory request)
+        if not path or path == "/":
+            path = "auth.html"
+            
+        file_path = f"frontend/{path}"
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail=f"File {path} not found")
+        
+        # Check if it's actually a file (not a directory)
+        if not os.path.isfile(file_path):
+            raise HTTPException(status_code=404, detail=f"Path {path} is not a file")
+            
+        if path.endswith('.html'):
+            with open(file_path, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        elif path.endswith('.css'):
+            with open(file_path, "r", encoding="utf-8") as f:
+                return Response(content=f.read(), media_type="text/css")
+        elif path.endswith('.js'):
+            with open(file_path, "r", encoding="utf-8") as f:
+                return Response(content=f.read(), media_type="application/javascript")
+        else:
+            # For other file types, return as FileResponse
+            return FileResponse(file_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving file: {str(e)}")

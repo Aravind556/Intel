@@ -16,7 +16,7 @@ from ..models.pdf_models import (
 )
 from .text_extractor import PDFTextExtractor
 from .embedding_generator import EmbeddingGenerator
-from .database_manager import PDFDatabaseManager
+from core.database.manager import PDFDatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -25,16 +25,19 @@ class PDFProcessor:
     """Main PDF processing pipeline that coordinates all processing steps."""
     
     def __init__(self):
+        from core.database.config import DatabaseConfig
         self.text_extractor = PDFTextExtractor()
         self.embedding_generator = EmbeddingGenerator()
-        self.db_manager = PDFDatabaseManager()
+        db_config = DatabaseConfig()
+        self.db_manager = PDFDatabaseManager(db_config)
     
     async def process_pdf(self, 
                          file_content: bytes,
                          original_filename: str,
                          subject: Optional[str] = None,
                          description: Optional[str] = None,
-                         metadata: Optional[Dict[str, Any]] = None) -> ProcessingResponse:
+                         metadata: Optional[Dict[str, Any]] = None,
+                         user_id: Optional[str] = None) -> ProcessingResponse:
         """
         Process a PDF file through the complete pipeline.
         
@@ -44,6 +47,7 @@ class PDFProcessor:
             subject: Subject category (optional)
             description: Description of the PDF content (optional)
             metadata: Additional metadata (optional)
+            user_id: User ID for user-specific storage (required for new user-specific model)
             
         Returns:
             ProcessingResponse with results and status
@@ -55,7 +59,7 @@ class PDFProcessor:
             logger.info(f"📄 Starting PDF processing pipeline for: {original_filename}")
             logger.info(f"📊 File size: {len(file_content)} bytes")
             
-            # Validate file content
+            # Validate file content and size
             if not file_content or len(file_content) == 0:
                 logger.error("❌ Empty file content provided")
                 return ProcessingResponse(
@@ -64,6 +68,31 @@ class PDFProcessor:
                     error=ProcessingError(
                         error_type="VALIDATION_ERROR",
                         error_message="Empty file content"
+                    )
+                )
+            
+            # Check file size limit (50MB)
+            max_file_size = 50 * 1024 * 1024  # 50MB
+            if len(file_content) > max_file_size:
+                logger.error(f"❌ File too large: {len(file_content)} bytes (max: {max_file_size})")
+                return ProcessingResponse(
+                    success=False,
+                    message=f"File too large. Maximum size is {max_file_size // 1024 // 1024}MB",
+                    error=ProcessingError(
+                        error_type="VALIDATION_ERROR",
+                        error_message=f"File size {len(file_content)} exceeds limit {max_file_size}"
+                    )
+                )
+            
+            # Basic PDF format validation
+            if not file_content.startswith(b'%PDF'):
+                logger.error("❌ Invalid PDF format")
+                return ProcessingResponse(
+                    success=False,
+                    message="Invalid PDF format",
+                    error=ProcessingError(
+                        error_type="VALIDATION_ERROR",
+                        error_message="File does not appear to be a valid PDF"
                     )
                 )
             
@@ -82,13 +111,55 @@ class PDFProcessor:
             )
             
             logger.info("💾 Saving initial PDF document record...")
-            # Save initial document record
-            pdf_id = await self.db_manager.save_pdf_document(pdf_doc)
-            logger.info(f"✅ PDF document saved with ID: {pdf_id}")
+            # Save initial document record with user-specific access
+            try:
+                # Get or create subject for the user
+                if user_id:
+                    subject_name = subject or "General"
+                    user_subject = await self.db_manager.get_subject_by_name(user_id, subject_name)
+                    if not user_subject:
+                        # Create subject for the user
+                        subject_result = await self.db_manager.create_subject(
+                            user_id=user_id,
+                            name=subject_name,
+                            description=f"Auto-created subject for {subject_name} uploads"
+                        )
+                        if subject_result.get('success'):
+                            subject_id = subject_result['data']['id']
+                        else:
+                            raise Exception(f"Failed to create subject: {subject_result}")
+                    else:
+                        subject_id = user_subject['id']
+                else:
+                    # Fallback to system user (for backward compatibility)
+                    subject_id = "6866db7e-0acc-43fe-8d02-1069d59a3798"  # Use existing "General" subject
+                
+                # Store user_id in metadata for the PDF document
+                metadata_with_user = {**(metadata or {}), "user_id": user_id} if user_id else (metadata or {})
+                
+                pdf_record = await self.db_manager.create_pdf_record(
+                    filename=pdf_doc.filename,
+                    original_filename=pdf_doc.original_filename,
+                    subject_id=subject_id,
+                    file_path="",  # We're not storing files, just processing them
+                    file_size=pdf_doc.file_size,
+                    total_pages=getattr(pdf_doc, 'total_pages', None),
+                    metadata=metadata_with_user,
+                    user_id=user_id  # Pass user_id to database manager
+                )
+                print(f"DEBUG: pdf_record = {pdf_record}")
+                if pdf_record.get('success'):
+                    pdf_id = pdf_record['data']['id']
+                else:
+                    raise Exception(f"Database operation failed: {pdf_record}")
+                logger.info(f"✅ PDF document saved with ID: {pdf_id} for user: {user_id}")
+            except Exception as db_error:
+                print(f"DEBUG: Database error: {str(db_error)}")
+                raise db_error
             
             # Update status to processing
             logger.info("🔄 Updating status to PROCESSING...")
-            await self.db_manager.update_pdf_status(pdf_id, ProcessingStatus.PROCESSING)
+            await self.db_manager.update_pdf_processing_status(pdf_id, "processing")
             logger.info("✅ Status updated to PROCESSING")
             
             logger.info(f"🚀 Starting PDF processing for {original_filename} (ID: {pdf_id})")
@@ -109,8 +180,8 @@ class PDFProcessor:
             except Exception as e:
                 error_msg = f"Text extraction failed: {str(e)}"
                 logger.error(f"❌ {error_msg}")
-                await self.db_manager.update_pdf_status(
-                    pdf_id, ProcessingStatus.FAILED, error_message=error_msg
+                await self.db_manager.update_pdf_processing_status(
+                    pdf_id, "failed", error_message=error_msg
                 )
                 return ProcessingResponse(
                     success=False,
@@ -160,16 +231,31 @@ class PDFProcessor:
             # Step 4: Save chunks to database
             logger.info(f"💾 Step 4: Saving {len(pdf_chunks)} chunks to database...")
             try:
-                success = await self.db_manager.save_pdf_chunks(pdf_chunks)
-                if not success:
-                    raise ValueError("Failed to save chunks to database")
+                # Convert PDFChunk objects to dictionaries for database insertion
+                # Only include fields that exist in the database schema
+                chunk_dicts = []
+                for chunk in pdf_chunks:
+                    chunk_dict = {
+                        "pdf_id": chunk.pdf_id,
+                        "content": chunk.content,
+                        "chunk_index": chunk.chunk_index,
+                        "page_number": chunk.page_number,
+                        "embedding": chunk.embedding,
+                        "token_count": len(chunk.content.split()) if chunk.content else 0,  # Approximate token count
+                        "metadata": chunk.metadata or {}
+                    }
+                    chunk_dicts.append(chunk_dict)
+                
+                success = await self.db_manager.batch_create_chunks(chunk_dicts)
+                if not success.get('success', False):
+                    raise ValueError(f"Failed to save chunks to database: {success.get('error', 'Unknown error')}")
                 logger.info("✅ Chunks saved to database successfully")
                     
             except Exception as e:
                 error_msg = f"Database save failed: {str(e)}"
                 logger.error(f"❌ {error_msg}")
-                await self.db_manager.update_pdf_status(
-                    pdf_id, ProcessingStatus.FAILED, error_message=error_msg
+                await self.db_manager.update_pdf_processing_status(
+                    pdf_id, "failed", error_message=error_msg
                 )
                 return ProcessingResponse(
                     success=False,
@@ -183,8 +269,8 @@ class PDFProcessor:
             
             # Step 5: Update final status
             logger.info("🏁 Step 5: Updating final status to COMPLETED...")
-            await self.db_manager.update_pdf_status(
-                pdf_id, ProcessingStatus.COMPLETED, total_chunks=len(pdf_chunks)
+            await self.db_manager.update_pdf_processing_status(
+                pdf_id, "completed", chunk_count=len(pdf_chunks)
             )
             logger.info("✅ Status updated to COMPLETED")
             
@@ -207,8 +293,8 @@ class PDFProcessor:
             
             # Update status if we have a PDF ID
             if pdf_id:
-                await self.db_manager.update_pdf_status(
-                    pdf_id, ProcessingStatus.FAILED, error_message=error_msg
+                await self.db_manager.update_pdf_processing_status(
+                    pdf_id, "failed", error_message=error_msg
                 )
             
             logger.error(f"PDF processing failed for {original_filename}: {str(e)}")
@@ -224,21 +310,21 @@ class PDFProcessor:
                 )
             )
     
-    async def get_pdf_info(self, pdf_id: str) -> Optional[PDFDocument]:
-        """Get information about a processed PDF."""
-        return await self.db_manager.get_pdf_document(pdf_id)
+    async def get_pdf_info(self, pdf_id: str, user_id: Optional[str] = None) -> Optional[PDFDocument]:
+        """Get information about a processed PDF - user-specific access."""
+        return await self.db_manager.get_pdf_document(pdf_id, user_id=user_id)
     
-    async def list_pdfs(self, limit: int = 50, offset: int = 0):
-        """List processed PDFs with pagination."""
-        return await self.db_manager.list_pdf_documents(limit, offset)
+    async def list_pdfs(self, limit: int = 50, offset: int = 0, user_id: Optional[str] = None):
+        """List PDFs with user-specific filtering."""
+        return await self.db_manager.list_pdf_documents(limit=limit, offset=offset, user_id=user_id)
     
-    async def get_processing_stats(self) -> Dict[str, Any]:
-        """Get processing statistics."""
-        return await self.db_manager.get_processing_stats()
+    async def get_processing_stats(self, user_id: Optional[str] = None):
+        """Get processing statistics - user-specific."""
+        return await self.db_manager.get_processing_stats(user_id=user_id)
     
-    async def delete_pdf(self, pdf_id: str) -> bool:
-        """Delete a PDF and all its chunks."""
-        return await self.db_manager.delete_pdf_document(pdf_id)
+    async def delete_pdf(self, pdf_id: str, user_id: Optional[str] = None) -> bool:
+        """Delete a PDF and all its chunks - user-specific access."""
+        return await self.db_manager.delete_pdf_document(pdf_id, user_id=user_id)
     
     def _generate_filename(self, original_filename: str) -> str:
         """Generate a unique filename for storage."""

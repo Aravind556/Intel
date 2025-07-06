@@ -1,12 +1,101 @@
-// AI Tutor Frontend JavaScript
+/**
+ * AI Tutor Frontend Application
+ * Enhanced with authentication support
+ */
 
-class AITutorClient {
+class AITutorApp {
     constructor() {
         this.baseURL = window.location.origin;
-        this.currentSession = null;
-        this.isProcessing = false;
+        this.systemStatus = 'unknown';
+        this.uploadedFiles = [];
+        this.availableDocuments = [];
+        this.selectedDocumentId = null;
         
-        this.init();
+        // Authentication - now session-based
+        this.user = null;
+        
+        this.initializeApp();
+    }
+
+    async initializeApp() {
+        console.log('🚀 Initializing AI Tutor App...');
+        
+        // Check authentication status
+        await this.checkAuthState();
+        
+        // Initialize event listeners
+        this.initializeEventListeners();
+        
+        // Check system status
+        await this.checkSystemStatus();
+        
+        // Load available documents
+        await this.loadPDFList();
+        
+        console.log('✅ AI Tutor App initialized successfully');
+    }
+
+    async checkAuthState() {
+        try {
+            // Check if user is logged in by trying to get profile
+            const response = await fetch(`${this.baseURL}/api/v1/auth/profile`, {
+                method: 'GET',
+                credentials: 'include' // Include session cookie
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    this.user = result.user;
+                }
+            }
+        } catch (error) {
+            console.log('No active session');
+            this.user = null;
+        }
+        
+        this.updateAuthUI();
+    }
+
+    updateAuthUI() {
+        const userInfo = document.getElementById('userInfo');
+        const authButtons = document.getElementById('authButtons');
+        const userName = document.getElementById('userName');
+        
+        if (this.user) {
+            userName.textContent = `Welcome, ${this.user.name}`;
+            userInfo.style.display = 'flex';
+            authButtons.style.display = 'none';
+        } else {
+            userInfo.style.display = 'none';
+            authButtons.style.display = 'flex';
+        }
+    }
+
+    async handleLogout() {
+        try {
+            await fetch(`${this.baseURL}/api/v1/auth/logout`, {
+                method: 'POST',
+                credentials: 'include' // Include session cookie
+            });
+        } catch (error) {
+            console.error('Logout error:', error);
+        } finally {
+            this.user = null;
+            this.updateAuthUI();
+            this.showSuccess('Logged out successfully');
+        }
+    }
+
+    initializeEventListeners() {
+        // Logout button
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => this.handleLogout());
+        }
+        
+        // Call the existing setup method
+        this.setupEventListeners();
     }
 
     init() {
@@ -127,6 +216,37 @@ class AITutorClient {
         }
     }
 
+    async checkSystemStatus() {
+        try {
+            // Add timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+            
+            const response = await fetch(`${this.baseURL}/health`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            const data = await response.json();
+            
+            if (response.ok && data.status === 'healthy') {
+                this.systemStatus = 'online';
+                console.log('✅ System status: Online');
+            } else {
+                this.systemStatus = 'degraded';
+                console.log('⚠️ System status: Degraded');
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log('⏰ System check timed out');
+            } else {
+                console.log('❌ System check error:', error);
+            }
+            this.systemStatus = 'offline';
+            console.log('❌ System status: Offline');
+        }
+    }
+
     async loadSystemStats() {
         try {
             const response = await fetch(`${this.baseURL}/api/v1/stats`);
@@ -178,7 +298,9 @@ class AITutorClient {
 
     async askQuestion() {
         const questionInput = document.getElementById('questionInput');
+        const pdfSelector = document.getElementById('pdfSelector');
         const question = questionInput.value.trim();
+        const selectedPDF = pdfSelector ? pdfSelector.value : null;
         
         if (!question) {
             this.showError('Please enter a question first.');
@@ -188,35 +310,54 @@ class AITutorClient {
         if (this.isProcessing) return;
         
         this.isProcessing = true;
-        this.showLoading('Processing your question...');
+        
+        // Show loading message based on whether a specific PDF is selected
+        const loadingMessage = selectedPDF 
+            ? 'Searching in selected document...' 
+            : 'Processing your question...';
+        this.showLoading(loadingMessage);
         this.hideAllSections();
 
-        const processingSteps = [
-            'Analyzing question...',
-            'Searching knowledge base...',
-            'Generating response...',
-            'Formatting answer...'
-        ];
+        const processingSteps = selectedPDF 
+            ? [
+                'Analyzing question...',
+                'Searching selected document...',
+                'Extracting relevant content...',
+                'Generating response...'
+            ]
+            : [
+                'Analyzing question...',
+                'Searching knowledge base...',
+                'Generating response...',
+                'Formatting answer...'
+            ];
 
         this.showProcessingSteps(processingSteps);
 
         try {
+            const requestBody = {
+                question: question,
+                user_id: null // Using default user for now
+            };
+            
+            // Add document_id if a specific PDF is selected
+            if (selectedPDF) {
+                requestBody.document_id = selectedPDF;
+            }
+
             const response = await fetch(`${this.baseURL}/api/v1/ask`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    question: question,
-                    user_id: null // Using default user for now
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const data = await response.json();
             
             if (response.ok) {
                 this.currentSession = data.session_id;
-                this.displayAnswer(data);
+                this.displayAnswer(data, selectedPDF);
             } else {
                 throw new Error(data.detail || 'Failed to process question');
             }
@@ -306,7 +447,7 @@ class AITutorClient {
         analysisSection.classList.add('fade-in');
     }
 
-    displayAnswer(data) {
+    displayAnswer(data, selectedPDF = null) {
         const answerSection = document.getElementById('answerSection');
         const quickAnswer = document.getElementById('quickAnswer');
         const detailedExplanation = document.getElementById('detailedExplanation');
@@ -330,10 +471,15 @@ class AITutorClient {
             confidenceBadge.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
         }
 
-        // Display quick answer
+        // Display quick answer with document context
         if (data.answer.quick_answer) {
+            const contextInfo = selectedPDF 
+                ? '<div class="document-context"><i class="fas fa-file-pdf"></i> Searched in selected document</div>'
+                : '<div class="document-context"><i class="fas fa-globe"></i> Searched all documents</div>';
+            
             quickAnswer.innerHTML = `
                 <h4><i class="fas fa-zap"></i> Quick Answer</h4>
+                ${contextInfo}
                 <p>${data.answer.quick_answer}</p>
             `;
         }
@@ -362,7 +508,7 @@ class AITutorClient {
             relatedQuestions.innerHTML = `
                 <h5><i class="fas fa-question"></i> Related Questions</h5>
                 ${data.next_steps.related_questions.map(q => 
-                    `<div class="suggestion-item" onclick="tutorClient.askRelatedQuestion('${q}')">${q}</div>`
+                    `<div class="suggestion-item" onclick="window.tutorClient.askRelatedQuestion('${q}')">${q}</div>`
                 ).join('')}
             `;
         }
@@ -576,13 +722,32 @@ class AITutorClient {
     }
 
     async loadPDFList() {
+        console.log('📋 Loading PDF list...');
         try {
-            const response = await fetch(`${this.baseURL}/api/v1/pdfs`);
+            // Add timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            
+            const response = await fetch(`${this.baseURL}/api/v1/pdfs`, {
+                credentials: 'include', // Include session cookie
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            console.log('📋 PDF list response status:', response.status);
+            
             const pdfs = await response.json();
+            console.log('📋 PDF list data:', pdfs);
             
             this.displayPDFList(pdfs);
         } catch (error) {
-            console.error('Failed to load PDF list:', error);
+            if (error.name === 'AbortError') {
+                console.log('⏰ PDF list load timed out');
+            } else {
+                console.error('Failed to load PDF list:', error);
+            }
+            // Show empty state if loading fails
+            this.displayPDFList([]);
         }
     }
 
@@ -592,11 +757,13 @@ class AITutorClient {
         
         if (!pdfs || pdfs.length === 0) {
             emptyState.style.display = 'block';
+            this.populatePDFSelector([]); // Clear selector
             return;
         }
         
         emptyState.style.display = 'none';
         
+        // Populate the PDF list display
         pdfList.innerHTML = pdfs.map(pdf => `
             <div class="pdf-item">
                 <div class="pdf-info">
@@ -614,12 +781,47 @@ class AITutorClient {
                     ${pdf.processing_status}
                 </div>
                 <div class="pdf-actions">
-                    <button class="delete-btn" onclick="tutorClient.deletePDF('${pdf.id}')">
+                    <button class="delete-btn" onclick="window.tutorClient.deletePDF('${pdf.id}')">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
             </div>
         `).join('');
+        
+        // Populate the PDF selector dropdown
+        this.populatePDFSelector(pdfs);
+    }
+    
+    populatePDFSelector(pdfs) {
+        const pdfSelector = document.getElementById('pdfSelector');
+        if (!pdfSelector) return;
+        
+        // Clear existing options except the first one
+        pdfSelector.innerHTML = '<option value="">🌐 Search all documents</option>';
+        
+        // Add processed PDFs to the selector
+        const processedPDFs = pdfs.filter(pdf => pdf.processing_status === 'completed');
+        
+        processedPDFs.forEach(pdf => {
+            const option = document.createElement('option');
+            option.value = pdf.id;
+            option.textContent = `📄 ${pdf.original_filename}`;
+            
+            // Add chunk count for user info
+            if (pdf.total_chunks > 0) {
+                option.textContent += ` (${pdf.total_chunks} chunks)`;
+            }
+            
+            pdfSelector.appendChild(option);
+        });
+        
+        // If no processed PDFs, add a disabled option
+        if (processedPDFs.length === 0 && pdfs.length > 0) {
+            const option = document.createElement('option');
+            option.textContent = '⏳ No processed documents yet';
+            option.disabled = true;
+            pdfSelector.appendChild(option);
+        }
     }
 
     async deletePDF(pdfId) {
@@ -658,7 +860,7 @@ class AITutorClient {
 
 // Initialize the application when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    window.tutorClient = new AITutorClient();
+    window.tutorClient = new AITutorApp();
     
     // Add some helpful console messages
     console.log('🎓 AI Tutor Frontend Loaded');
