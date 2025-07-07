@@ -125,7 +125,7 @@ USING gin(to_tsvector('english', content));
 
 -- Vector search function for LLM retrieval
 CREATE OR REPLACE FUNCTION match_documents_by_subject (
-    query_embedding VECTOR(768),  -- Updated to 768 for nomic-embed-text
+    query_embedding VECTOR(768),
     subject_name VARCHAR(255),
     user_id UUID,
     match_threshold FLOAT DEFAULT 0.75,
@@ -153,10 +153,10 @@ AS $$
     FROM document_chunks dc
     JOIN pdf_documents pd ON dc.pdf_id = pd.id
     JOIN subjects s ON pd.subject_id = s.id
-    WHERE s.name ILIKE subject_name -- Case-insensitive subject matching
-    AND s.user_id = user_id
-    AND pd.processed = TRUE -- Only search processed documents
-    AND dc.embedding IS NOT NULL -- Ensure embedding exists
+    WHERE s.name ILIKE subject_name
+    AND s.user_id = match_documents_by_subject.user_id  -- FIXED HERE
+    AND pd.processed = TRUE
+    AND dc.embedding IS NOT NULL
     AND 1 - (dc.embedding <=> query_embedding) > match_threshold
     ORDER BY dc.embedding <=> query_embedding
     LIMIT match_count;
@@ -302,7 +302,6 @@ FOR ALL USING (
         AND s.user_id = auth.uid()
     )
 );
-);
 
 -- Insert some sample data for testing (optional)
 -- Uncomment below if you want test data
@@ -348,5 +347,6 @@ COMMENT ON TABLE pdf_documents IS 'Stores metadata about uploaded PDF files';
 COMMENT ON TABLE document_chunks IS 'Stores text chunks with vector embeddings for LLM retrieval';
 COMMENT ON TABLE subjects IS 'Organizes PDFs by academic subjects';
 COMMENT ON INDEX idx_document_chunks_embedding IS 'Vector similarity search index - critical for LLM performance';
+
 
 -- Complete! Database is ready for PDF storage and LLM data retrieval
