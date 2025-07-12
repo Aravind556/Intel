@@ -6,7 +6,6 @@
 
 > "Notionary is not just an assistant—it's your classroom companion, ensuring every student gets the help they need from the material they trust."
 > 
----
 
 ## 💡 Why Notionary Matters
 
@@ -23,8 +22,6 @@ Modern classrooms struggle with:
 * 🧬 Local embeddings via **Ollama** for performance and privacy
 * 🔒 **Row-Level Security (RLS)** in Supabase for strict user isolation
 * 🧠 LLMs (Gemini) instructed with **strict prompting** to avoid hallucination
-
----
 
 ## 🌟 Key Features
 
@@ -66,8 +63,6 @@ Modern classrooms struggle with:
 
 * If LLM finds no relevant context, it **refuses** to generate general knowledge
 * Clear citation and reference model for transparency
-
----
 
 ## 🏁 Quick Start Guide
 
@@ -133,7 +128,6 @@ Visit:
 * 📚 API Docs: `http://localhost:8000/docs`
 * 💚 Health: `http://localhost:8000/health`
 
----
 
 ## ❓ How to Use
 
@@ -160,8 +154,6 @@ curl -X POST "http://localhost:8000/api/v1/ask" -H "Content-Type: application/js
 
 > "Who is Ramanujan?" → "The selected document does not contain information about Ramanujan."
 
----
-
 ## 🧬 Architecture
 
 ```
@@ -177,8 +169,6 @@ curl -X POST "http://localhost:8000/api/v1/ask" -H "Content-Type: application/js
                             +-----------+
 ```
 
----
-
 ## 🛠️ Project Structure
 
 ```
@@ -191,8 +181,6 @@ ai-tutor-backend/
 ├── run_server.py             # Entry point
 └── .env                      # Environment vars
 ```
-
----
 
 ## 🧪 Test Coverage
 
@@ -208,8 +196,6 @@ Test scripts:
 * `test_subjects_endpoint.py`
 * `debug_document_restriction.py`
 
----
-
 ## 📈 Scaling & Cost
 
 * **Local Embeddings**: Free with Ollama
@@ -217,8 +203,6 @@ Test scripts:
 * **Supabase Free Tier**: 500MB storage, 2GB bandwidth
 
 Estimated Monthly Cost: `$0 – $3` for moderate usage
-
----
 
 ## 🔮 Future Plans
 
@@ -229,13 +213,9 @@ Estimated Monthly Cost: `$0 – $3` for moderate usage
 * [ ] Multi-language Support
 * [ ] Teacher Dashboard
 
----
-
 ## 🤝 Contributing
 
 PRs are welcome! Please follow conventions, write clean code and add tests.
-
----
 
 ## 📬 Contact
 
