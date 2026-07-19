@@ -15,7 +15,7 @@ from core.database.manager import PDFDatabaseManager
 from modules.doubt_solver.services.response_generator import ResponseGenerator
 from modules.pdf_processor.services.pdf_processor import PDFProcessor
 from modules.pdf_processor.models.pdf_models import ProcessingResponse, PDFDocument
-from simple_auth import SimpleAuth
+from core.simple_auth import SimpleAuth
 from modules.agents.retrieval_agent import RetrievalAgent
 from modules.agents.tutor_agent import AITutorAgent
 
@@ -115,8 +115,10 @@ class TutorChatRequest(BaseModel):
     concept: Optional[str] = None
 
 class QuizRequest(BaseModel):
-    concept: str
+    concept: Optional[str] = None
+    document_id: Optional[str] = None
     question_type: str = "mcq"
+    num_questions: int = 5
 
 class EvaluateRequest(BaseModel):
     concept: str
@@ -650,7 +652,7 @@ async def api_start_lesson(
     """Start a structured concept-building tutoring flow."""
     session_id = request.session_id or str(uuid.uuid4())
     result = await tutor.start_lesson(
-        student_id=user_data["id"],
+        student_id=user_data["user_id"],
         concept=request.concept,
         session_id=session_id
     )
@@ -666,7 +668,7 @@ async def api_tutor_chat(
 ):
     """Interact with the AI Tutor or ask doubts, strictly grounded in PDFs."""
     result = await tutor.process_message(
-        student_id=user_data["id"],
+        student_id=user_data["user_id"],
         message=request.message,
         session_id=request.session_id,
         current_concept=request.concept
@@ -682,10 +684,12 @@ async def api_generate_quiz(
     tutor: AITutorAgent = Depends(get_tutor_agent)
 ):
     """Generate a quiz question (MCQ, Subjective, or Coding) calibrated to mastery."""
-    result = await tutor.generate_quiz(
-        student_id=user_data["id"],
+    result = await tutor.generate_quiz_batch(
+        student_id=user_data["user_id"],
         concept=request.concept,
-        question_type=request.question_type
+        question_type=request.question_type,
+        num_questions=request.num_questions,
+        document_id=request.document_id
     )
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("error"))
@@ -699,7 +703,7 @@ async def api_evaluate_answer(
 ):
     """Grade student answer, diagnose misconceptions, and update mastery state."""
     result = await tutor.evaluate_answer(
-        student_id=user_data["id"],
+        student_id=user_data["user_id"],
         concept=request.concept,
         question_text=request.question_text,
         student_answer=request.student_answer,
@@ -715,7 +719,7 @@ async def api_get_mastery_profile(
     db_mgr: PDFDatabaseManager = Depends(get_db_manager)
 ):
     """Fetch mastery level scores across all concepts for the student."""
-    mastery_list = await db_mgr.list_student_mastery(user_data["id"])
+    mastery_list = await db_mgr.list_student_mastery(user_data["user_id"])
     return {"success": True, "mastery": mastery_list}
 
 @app.post("/api/v1/profile/preferences")
@@ -725,8 +729,18 @@ async def api_update_preferences(
     db_mgr: PDFDatabaseManager = Depends(get_db_manager)
 ):
     """Insert or update student learning preferences."""
-    result = await db_mgr.upsert_student_profile(user_data["id"], request.preferences)
+    result = await db_mgr.upsert_student_profile(user_data["user_id"], request.preferences)
     return result
+
+@app.get("/api/v1/profile/preferences")
+async def api_get_preferences(
+    user_data: dict = Depends(get_current_user),
+    db_mgr: PDFDatabaseManager = Depends(get_db_manager)
+):
+    """Fetch student learning preferences."""
+    profile = await db_mgr.get_student_profile(user_data["user_id"])
+    preferences = profile.get("learning_preferences", {}) if profile else {}
+    return {"success": True, "preferences": preferences}
 
 
 # Static file serving - only mount if directory exists

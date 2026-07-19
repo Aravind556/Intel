@@ -3,248 +3,416 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Tutor - Doubt Solver</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <title>AI Tutor Agent - ChatGPT-Inspired learning Hub</title>
+    <link rel="stylesheet" href="/static/style.css?v=2.0">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-content">
-                <h1><i class="fas fa-graduation-cap"></i> AI Tutor</h1>
-                <p>Your intelligent learning companion</p>
+    <div class="app-layout">
+        <!-- LEFT SIDEBAR -->
+        <aside class="sidebar">
+            <!-- Brand Header -->
+            <div class="brand-header">
+                <h1 class="brand-title">
+                    <i class="fas fa-graduation-cap"></i> AI Tutor
+                </h1>
+                <div class="system-status" id="systemStatus">
+                    <i class="fas fa-circle status-indicator checking" id="statusIndicator"></i>
+                    <span id="statusText">Checking...</span>
+                </div>
             </div>
-            <div class="header-actions">
-                <div class="user-info" id="userInfo" style="display: none;">
-                    <span id="userName"></span>
-                    <button id="logoutBtn" class="btn btn-sm btn-secondary">
-                        <i class="fas fa-sign-out-alt"></i> Logout
+
+            <!-- Sidebar Items -->
+            <div class="sidebar-content">
+                <!-- Action Buttons -->
+                <div class="action-buttons">
+                    <button class="btn-sidebar-action primary" id="btnNewDoubt">
+                        <i class="fas fa-question-circle"></i> New Doubt Solver
+                    </button>
+                    <button class="btn-sidebar-action" id="btnStartLessonAction">
+                        <i class="fas fa-book-open"></i> Start Concept Lesson
+                    </button>
+                    <button class="btn-sidebar-action" id="btnTakeQuizAction">
+                        <i class="fas fa-vial"></i> Take Calibrated Quiz
                     </button>
                 </div>
-                <div class="auth-buttons" id="authButtons">
-                    <a href="/frontend/auth.html" class="btn btn-sm btn-primary">
-                        <i class="fas fa-sign-in-alt"></i> Login
+
+                <!-- Navigation Menu -->
+                <nav class="nav-menu">
+                    <div class="nav-item active" id="navChat" data-window="chatWindow">
+                        <i class="fas fa-comments"></i> Conversational Room
+                    </div>
+                    <div class="nav-item" id="navMastery" data-window="masteryWindow">
+                        <i class="fas fa-award"></i> Mastery Dashboard
+                    </div>
+                    <div class="nav-item" id="navPdfs" data-window="pdfWindow">
+                        <i class="fas fa-file-pdf"></i> Textbook Library
+                    </div>
+                    <div class="nav-item" id="navPreferences" data-window="preferencesWindow">
+                        <i class="fas fa-sliders-h"></i> Learning Preferences
+                    </div>
+                </nav>
+
+                <!-- Document Library Section -->
+                <div class="sidebar-library">
+                    <div class="library-header">
+                        <span>Ingested PDFs</span>
+                        <i class="fas fa-book"></i>
+                    </div>
+                    <div class="library-list" id="sidebarPdfList">
+                        <!-- Compact listing populated by JS -->
+                        <div class="empty-state" style="padding:10px; font-size:11px;">No documents uploaded.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Profile Panel -->
+            <div class="sidebar-footer">
+                <div class="user-profile-summary" id="userInfo" style="display: none;">
+                    <div class="user-avatar" id="userAvatar">S</div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName">Student Name</div>
+                        <div class="user-role" id="userRole">Student</div>
+                    </div>
+                    <button id="logoutBtn" class="btn-logout" title="Log Out">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+                <div class="user-profile-summary" id="authButtons">
+                    <a href="/frontend/auth.html" class="btn-sidebar-action primary" style="text-decoration:none; justify-content:center;">
+                        <i class="fas fa-sign-in-alt"></i> Log In / Register
                     </a>
                 </div>
             </div>
-            <div class="system-status" id="systemStatus">
-                <i class="fas fa-circle status-indicator" id="statusIndicator"></i>
-                <span id="statusText">Checking system...</span>
-            </div>
-        </header>
-
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- PDF Upload Section -->
-            <section class="pdf-section">
-                <div class="upload-container">
-                    <h2><i class="fas fa-file-pdf"></i> Upload Learning Materials</h2>
-                    <div class="upload-area" id="uploadArea">
-                        <div class="upload-content">
-                            <i class="fas fa-cloud-upload-alt upload-icon"></i>
-                            <h3>Drag & Drop PDF files here</h3>
-                            <p>or click to browse files</p>
-                            <input type="file" id="pdfFileInput" accept=".pdf" multiple hidden>
-                            <button id="browseBtn" class="btn btn-secondary">
-                                <i class="fas fa-folder-open"></i> Browse Files
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Upload Form -->
-                    <div class="upload-form" id="uploadForm" style="display: none;">
-                        <div class="form-group">
-                            <label for="subjectInput">Subject (Optional)</label>
-                            <input type="text" id="subjectInput" placeholder="e.g., Mathematics, Physics, Chemistry">
-                        </div>
-                        <div class="form-group">
-                            <label for="descriptionInput">Description (Optional)</label>
-                            <textarea id="descriptionInput" placeholder="Brief description of the content..."></textarea>
-                        </div>
-                        <div class="form-actions">
-                            <button id="cancelUploadBtn" class="btn btn-secondary">Cancel</button>
-                            <button id="uploadBtn" class="btn btn-primary">
-                                <i class="fas fa-upload"></i> Upload & Process
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Upload Progress -->
-                    <div class="upload-progress" id="uploadProgress" style="display: none;">
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="progressFill"></div>
-                        </div>
-                        <p id="progressText">Uploading...</p>
-                    </div>
-                </div>
-                
-                <!-- PDF List -->
-                <div class="pdf-list-container">
-                    <h3><i class="fas fa-list"></i> Uploaded Documents</h3>
-                    <div class="pdf-list" id="pdfList">
-                        <div class="empty-state" id="emptyState">
-                            <i class="fas fa-book"></i>
-                            <p>No documents uploaded yet. Upload PDF files to get started!</p>
-                        </div>
-                    </div>
-                </div>
-            </section>
-            
-            <!-- Question Input Section -->
-            <section class="question-section">
-                <div class="input-container">
-                    <h2><i class="fas fa-question-circle"></i> Ask Your Question</h2>
-                    
-                    <!-- PDF Selection for Document-Specific Questions -->
-                    <div class="pdf-selector-wrapper">
-                        <label for="pdfSelector">
-                            <i class="fas fa-file-pdf"></i> Ask about a specific document (optional)
-                        </label>
-                        <select id="pdfSelector" class="pdf-selector">
-                            <option value="">🌐 Search all documents</option>
-                            <!-- PDF options will be populated dynamically -->
-                        </select>
-                        <div class="selector-info">
-                            <i class="fas fa-info-circle"></i>
-                            <span>Select a document to ask questions only about that PDF, or leave as "all documents" to search everything</span>
-                        </div>
-                    </div>
-                    
-                    <div class="question-input-wrapper">
-                        <textarea 
-                            id="questionInput" 
-                            placeholder="Type your question here... (e.g., 'What is calculus?', 'How do I solve quadratic equations?')"
-                            rows="4"
-                        ></textarea>
-                        <div class="input-actions">
-                            <button id="analyzeBtn" class="btn btn-secondary">
-                                <i class="fas fa-search"></i> Analyze Only
-                            </button>
-                            <button id="askBtn" class="btn btn-primary">
-                                <i class="fas fa-paper-plane"></i> Ask Question
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Quick Examples -->
-                <div class="quick-examples">
-                    <h3>Try these examples:</h3>
-                    <div class="example-buttons">
-                        <button class="example-btn" data-question="What is calculus?">
-                            <i class="fas fa-calculator"></i> What is calculus?
-                        </button>
-                        <button class="example-btn" data-question="How do I solve quadratic equations?">
-                            <i class="fas fa-square-root-alt"></i> Solve quadratic equations
-                        </button>
-                        <button class="example-btn" data-question="Explain the concept of derivatives">
-                            <i class="fas fa-chart-line"></i> Explain derivatives
-                        </button>
-                        <button class="example-btn" data-question="Calculate the area under curve y = x^2">
-                            <i class="fas fa-area-chart"></i> Calculate area under curve
-                        </button>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Loading Section -->
-            <section class="loading-section" id="loadingSection" style="display: none;">
-                <div class="loading-content">
-                    <div class="spinner"></div>
-                    <p id="loadingText">Processing your question...</p>
-                    <div class="processing-steps" id="processingSteps"></div>
-                </div>
-            </section>
-
-            <!-- Analysis Results Section -->
-            <section class="analysis-section" id="analysisSection" style="display: none;">
-                <h3><i class="fas fa-brain"></i> Question Analysis</h3>
-                <div class="analysis-grid" id="analysisGrid">
-                    <!-- Analysis results will be populated here -->
-                </div>
-            </section>
-
-            <!-- Answer Section -->
-            <section class="answer-section" id="answerSection" style="display: none;">
-                <div class="answer-header">
-                    <h3><i class="fas fa-lightbulb"></i> Answer</h3>
-                    <div class="confidence-badge" id="confidenceBadge">
-                        <i class="fas fa-shield-alt"></i>
-                        <span id="confidenceScore">--</span>% Confidence
-                    </div>
-                </div>
-
-                <!-- Quick Answer -->
-                <div class="quick-answer" id="quickAnswer">
-                    <!-- Quick answer content -->
-                </div>
-
-                <!-- Detailed Explanation -->
-                <div class="detailed-explanation" id="detailedExplanation">
-                    <!-- Detailed explanation content -->
-                </div>
-
-                <!-- Sources -->
-                <div class="sources-section" id="sourcesSection" style="display: none;">
-                    <h4><i class="fas fa-book"></i> Sources</h4>
-                    <div class="sources-list" id="sourcesList">
-                        <!-- Sources will be listed here -->
-                    </div>
-                </div>
-
-                <!-- Next Steps -->
-                <div class="next-steps" id="nextSteps" style="display: none;">
-                    <h4><i class="fas fa-arrow-right"></i> What's Next?</h4>
-                    <div class="next-steps-content">
-                        <div class="related-questions" id="relatedQuestions"></div>
-                        <div class="practice-suggestions" id="practiceSuggestions"></div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Error Section -->
-            <section class="error-section" id="errorSection" style="display: none;">
-                <div class="error-content">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <h3>Something went wrong</h3>
-                    <p id="errorMessage">Please try again or contact support.</p>
-                    <button id="retryBtn" class="btn btn-primary">
-                        <i class="fas fa-redo"></i> Try Again
-                    </button>
-                </div>
-            </section>
-        </main>
-
-        <!-- System Info Panel -->
-        <aside class="info-panel" id="infoPanel">
-            <div class="panel-header">
-                <h3><i class="fas fa-info-circle"></i> System Info</h3>
-                <button id="togglePanel" class="toggle-btn">
-                    <i class="fas fa-chevron-right"></i>
-                </button>
-            </div>
-            <div class="panel-content" id="panelContent">
-                <div class="stats-section">
-                    <h4>System Statistics</h4>
-                    <div class="stat-item">
-                        <span class="stat-label">Total PDFs:</span>
-                        <span class="stat-value" id="totalPdfs">--</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Processed:</span>
-                        <span class="stat-value" id="processedPdfs">--</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Total Chunks:</span>
-                        <span class="stat-value" id="totalChunks">--</span>
-                    </div>
-                </div>
-            </div>
         </aside>
+
+        <!-- RIGHT MAIN AREA -->
+        <main class="main-area">
+            <!-- Main Header -->
+            <header class="main-header">
+                <div class="header-concept">
+                    <i class="fas fa-graduation-cap" style="color:var(--accent-primary); font-size:20px;"></i>
+                    <span class="concept-title" id="currentViewTitle">Conversational Room</span>
+                    <span class="concept-badge" id="activeConceptBadge" style="display:none;">Active Concept: None</span>
+                </div>
+                <div class="header-metadata" id="headerMetadata" style="display:none;">
+                    <!-- Context metrics like citations count -->
+                </div>
+            </header>
+
+            <!-- Windows Container -->
+            <div class="window-container">
+                <!-- ==================== WINDOW 1: CHAT WINDOW ==================== -->
+                <div class="window-panel active" id="chatWindow">
+                    <div class="chat-window">
+                        <!-- Messages Pane -->
+                        <div class="chat-messages" id="chatMessages">
+                            <!-- Welcome / Initial Prompt suggestions -->
+                            <div class="message-bubble tutor fade-in" style="max-width:100%;">
+                                <div class="msg-icon"><i class="fas fa-robot"></i></div>
+                                <div class="msg-content">
+                                    <h3>Welcome to AI Tutor!</h3>
+                                    <p style="margin-top: 8px;">I am your personal AI teacher. I can explain chapters, solve conceptual doubts, generate quizzes, and evaluate your understanding. Every response is strictly grounded in the textbook PDFs you upload.</p>
+                                    <p style="margin-top: 6px;">How would you like to start today? Select one of the quick options or start a new lesson from the sidebar.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Prompt Suggestion Cards -->
+                        <div class="prompt-suggestions" id="chatSuggestions">
+                            <div class="suggestion-card" data-action="lesson" data-concept="Standard Normal Distribution">
+                                <i class="fas fa-book-open"></i>
+                                <strong>Learn Normal Distribution</strong>
+                                <span class="suggestion-desc">Start a structured lesson on z-scores.</span>
+                            </div>
+                            <div class="suggestion-card" data-action="quiz" data-concept="Standard Normal Distribution">
+                                <i class="fas fa-vial"></i>
+                                <strong>Quiz on Normal Distribution</strong>
+                                <span class="suggestion-desc">Test your understanding with difficulty pacing.</span>
+                            </div>
+                            <div class="suggestion-card" data-action="preferences">
+                                <i class="fas fa-user-cog"></i>
+                                <strong>Personalize Explanations</strong>
+                                <span class="suggestion-desc">Adjust sports, tech, or cooking analogies.</span>
+                            </div>
+                        </div>
+
+                        <!-- Chat Input Box -->
+                        <div class="chat-input-container">
+                            <div class="chat-input-wrapper">
+                                <textarea class="chat-input-field" id="questionInput" placeholder="Ask a doubt or write your query... (Press Ctrl+Enter to send)" rows="1"></textarea>
+                                <button class="chat-submit-btn" id="askBtn">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==================== WINDOW 2: QUIZ WINDOW ==================== -->
+                <div class="window-panel" id="quizWindow">
+                    <div class="quiz-window">
+                        <!-- Setup Quiz Pane (Visible when no active quiz) -->
+                        <div id="quizSetupPane" class="quiz-card fade-in">
+                            <h3 style="margin-bottom:16px;"><i class="fas fa-vial" style="color:var(--accent-primary);"></i> Launch Calibrated Assessment</h3>
+                            <p style="color:var(--text-secondary); margin-bottom:20px; font-size:14px;">Test your knowledge on any textbook concept. The system will read your mastery level and generate an MCQ, subjective, or coding question calibrated to your level.</p>
+                            
+                            <div class="preference-group" style="margin-bottom:16px;">
+                                <label>Source Document (Strictly Grounded)</label>
+                                <select class="preference-select" id="quizDocumentSelect">
+                                    <option value="">-- Select a document --</option>
+                                </select>
+                            </div>
+                            
+                            <div class="preference-group" style="margin-bottom:16px;">
+                                <label>Concept to test (Optional)</label>
+                                <input type="text" class="preference-input" id="quizConceptInput" placeholder="e.g. Standard Normal Distribution, Derivatives (or leave empty)">
+                            </div>
+
+                            <div class="preference-group" style="margin-bottom:16px;">
+                                <label>Number of Questions</label>
+                                <select class="preference-select" id="quizNumQuestionsSelect">
+                                    <option value="3">3 Questions</option>
+                                    <option value="5" selected>5 Questions</option>
+                                    <option value="10">10 Questions</option>
+                                </select>
+                            </div>
+
+                            <div class="preference-group" style="margin-bottom:20px;">
+                                <label>Question Type</label>
+                                <select class="preference-select" id="quizTypeSelect">
+                                    <option value="mcq">Multiple Choice Question (MCQ)</option>
+                                    <option value="subjective">Subjective Conceptual Question</option>
+                                    <option value="coding">Coding Execution Challenge</option>
+                                </select>
+                            </div>
+
+                            <button class="btn-sidebar-action primary" id="btnLaunchQuiz" style="justify-content:center;">
+                                <i class="fas fa-play"></i> Generate Quiz
+                            </button>
+                        </div>
+
+                        <!-- Active Quiz Pane (Hidden initially) -->
+                        <div id="quizActivePane" class="quiz-card fade-in" style="display:none;">
+                            <div class="quiz-badge-row">
+                                <span class="concept-badge" id="quizActiveConcept">Standard Normal Distribution</span>
+                                <div class="quiz-difficulty-stars" id="quizDifficultyStars">
+                                    <!-- Stars dynamically populated -->
+                                </div>
+                            </div>
+                            
+                            <div class="quiz-question-text" id="quizQuestionText">
+                                Loading question...
+                            </div>
+
+                            <!-- Options for MCQ questions -->
+                            <div class="mcq-options-container" id="quizMcqOptions">
+                                <!-- Options populated dynamically -->
+                            </div>
+
+                            <!-- Text area for subjective / coding questions -->
+                            <textarea class="subjective-quiz-editor" id="quizSubjectiveAnswer" placeholder="Type your answer here..." style="display:none;"></textarea>
+
+                            <div class="quiz-action-bar">
+                                <button class="btn-quiz-submit" id="btnSubmitQuizAnswer">Submit Answer</button>
+                            </div>
+                        </div>
+
+                        <!-- Evaluation Card (Hidden initially) -->
+                        <div id="quizEvaluationCard" class="evaluation-card fade-in" style="display:none;">
+                            <div class="evaluation-header">
+                                <div class="evaluation-score-row">
+                                    <div class="evaluation-score-circle" id="evalScoreCircle">80%</div>
+                                    <div>
+                                        <div class="evaluation-feedback-title" id="evalFeedbackTitle">Excellent Attempt!</div>
+                                        <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;" id="evalMasteryDelta">Mastery level increased by +0.15</div>
+                                    </div>
+                                </div>
+                                <span class="concept-badge" id="evalStatusBadge">Correct</span>
+                            </div>
+
+                            <div class="evaluation-feedback-text" id="evalFeedbackText">
+                                Feedback description...
+                            </div>
+
+                            <!-- Misconceptions list -->
+                            <div class="misconceptions-panel" id="evalMisconceptionsPanel" style="display:none;">
+                                <div class="misconceptions-header">
+                                    <i class="fas fa-exclamation-triangle"></i> Diagnosed Misconceptions
+                                </div>
+                                <div id="evalMisconceptionsList">
+                                    <!-- Misconception list tags -->
+                                </div>
+                            </div>
+
+                            <div class="quiz-action-bar">
+                                <button class="btn-sidebar-action" id="btnNextQuizQuestion" style="width:auto;">
+                                    <i class="fas fa-arrow-right"></i> Practice Another Question
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Summary Pane (Hidden initially) -->
+                        <div id="quizSummaryPane" class="quiz-card fade-in" style="display:none; text-align: center; max-width: 500px; margin: 0 auto;">
+                            <h3 style="margin-bottom:16px; font-size: 22px;"><i class="fas fa-trophy" style="color:var(--warning); font-size: 2rem; display: block; margin-bottom: 10px;"></i> Quiz Completed!</h3>
+                            <p style="color:var(--text-secondary); margin-bottom:20px; font-size:16px;" id="quizSummaryText">You scored X out of Y.</p>
+                            
+                            <div id="quizSummaryDetailedReport" style="text-align: left; margin-bottom: 24px; max-height: 250px; overflow-y: auto; padding: 12px; background: rgba(255,255,255,0.05); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); font-size: 13px;">
+                                <!-- Details of each question response -->
+                            </div>
+
+                            <button class="btn-sidebar-action primary" id="btnRestartQuiz" style="justify-content:center; margin: 0 auto; width: auto;">
+                                <i class="fas fa-redo"></i> Take Another Quiz
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==================== WINDOW 3: MASTERY DASHBOARD ==================== -->
+                <div class="window-panel" id="masteryWindow">
+                    <div style="margin-bottom: 24px;">
+                        <h2 style="font-family:'Outfit'; font-size:24px;">Student Mastery Dashboard</h2>
+                        <p style="color:var(--text-secondary); font-size:14px; margin-top:4px;">Tracks your conceptual understanding score based on structured quiz performance.</p>
+                    </div>
+
+                    <!-- Mastery Grid -->
+                    <div class="mastery-grid" id="masteryGridContainer">
+                        <!-- Concept cards filled by JS -->
+                        <div class="empty-state" style="grid-column:1/-1;">
+                            <i class="fas fa-graduation-cap"></i>
+                            <p>No mastery data recorded yet. Take lessons and complete quizzes to build your profile.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==================== WINDOW 4: PDF TEXTBOOK LIBRARY ==================== -->
+                <div class="window-panel" id="pdfWindow">
+                    <div class="pdf-window">
+                        <div>
+                            <h2 style="font-family:'Outfit'; font-size:24px; margin-bottom:6px;">Textbook Library</h2>
+                            <p style="color:var(--text-secondary); font-size:14px;">Ingest new learning materials (PDFs) to automatically parse their content, build index embeddings, and ground all tutor conversations.</p>
+                        </div>
+
+                        <!-- Drag and Drop area -->
+                        <div class="pdf-drop-zone" id="uploadArea">
+                            <i class="fas fa-cloud-upload-alt pdf-drop-icon"></i>
+                            <div class="pdf-drop-text">Drag and drop your textbooks or click to browse</div>
+                            <div class="pdf-drop-subtext">Supports PDF format up to 50MB</div>
+                            <input type="file" id="pdfFileInput" accept=".pdf" multiple hidden>
+                        </div>
+
+                        <!-- Upload Details Ingestion Form -->
+                        <div class="pdf-ingest-form" id="uploadForm">
+                            <h3 style="margin-bottom:12px; font-size:16px;">Configure Ingestion</h3>
+                            <div class="pdf-ingest-grid">
+                                <div class="preference-group">
+                                    <label for="subjectInput">Subject Label (Optional)</label>
+                                    <input type="text" class="preference-input" id="subjectInput" placeholder="e.g. Statistics, Physics">
+                                </div>
+                                <div class="preference-group">
+                                    <label for="descriptionInput">Description (Optional)</label>
+                                    <input type="text" class="preference-input" id="descriptionInput" placeholder="e.g. Introduction to Statistics Chapter 4">
+                                </div>
+                            </div>
+                            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                                <button class="btn-sidebar-action" id="cancelUploadBtn" style="width:auto;">Cancel</button>
+                                <button class="btn-sidebar-action primary" id="uploadBtn" style="width:auto;">
+                                    <i class="fas fa-check"></i> Upload & Process PDF
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Ingestion Progress -->
+                        <div class="ingest-progress-card" id="uploadProgress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill"></div>
+                            </div>
+                            <p id="progressText" style="font-size:13px; color:var(--text-secondary);">Uploading file...</p>
+                        </div>
+
+                        <!-- PDF Ingested List Table -->
+                        <div style="margin-top:20px;">
+                            <h3 style="font-size:16px; margin-bottom:12px;"><i class="fas fa-list"></i> Managed Documents</h3>
+                            <div id="pdfList">
+                                <!-- Populated dynamically by JS -->
+                                <div class="empty-state">
+                                    <i class="fas fa-folder-open"></i>
+                                    <p>No documents uploaded yet. Add a PDF to get started!</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==================== WINDOW 5: LEARNING PREFERENCES ==================== -->
+                <div class="window-panel" id="preferencesWindow">
+                    <div style="margin-bottom: 24px; text-align:center;">
+                        <h2 style="font-family:'Outfit'; font-size:24px;">Personalize Your AI Tutor</h2>
+                        <p style="color:var(--text-secondary); font-size:14px; margin-top:4px;">Customize the teaching style, explanation depth, and coding languages the tutor uses.</p>
+                    </div>
+
+                    <div class="preferences-form">
+                        <!-- Analogy Style -->
+                        <div class="preference-group">
+                            <label><i class="fas fa-lightbulb" style="color:var(--warning);"></i> Analogy Explanation Style</label>
+                            <p style="font-size:11px; color:var(--text-muted);">How should the tutor construct analogies and comparisons?</p>
+                            <select class="preference-select" id="prefAnalogy">
+                                <option value="sports">Sports Comparisons (basketball, athletic training)</option>
+                                <option value="cooking">Cooking & Culinary Arts (recipes, food preparation)</option>
+                                <option value="space">Space & Astronomy (planets, orbits, star systems)</option>
+                                <option value="tech">Tech & Digital (coding, video games, hardware)</option>
+                                <option value="general">Standard Academic Explanations</option>
+                            </select>
+                        </div>
+
+                        <!-- Depth -->
+                        <div class="preference-group">
+                            <label><i class="fas fa-search-plus" style="color:var(--accent-secondary);"></i> Explanation Depth</label>
+                            <p style="font-size:11px; color:var(--text-muted);">Configure the detail level of explanations.</p>
+                            <select class="preference-select" id="prefDepth">
+                                <option value="brief">Brief & Conceptual (summarized overview)</option>
+                                <option value="medium" selected>Standard Balanced (recommended depth)</option>
+                                <option value="deep">Deep & Rigorous (theoretical details and derivations)</option>
+                            </select>
+                        </div>
+
+                        <!-- Coding Language -->
+                        <div class="preference-group">
+                            <label><i class="fas fa-code" style="color:var(--accent-primary);"></i> Primary Coding Language</label>
+                            <p style="font-size:11px; color:var(--text-muted);">Used for programming and execution challenges.</p>
+                            <select class="preference-select" id="prefLanguage">
+                                <option value="python">Python</option>
+                                <option value="javascript">JavaScript</option>
+                                <option value="cpp">C++</option>
+                                <option value="java">Java</option>
+                            </select>
+                        </div>
+
+                        <button class="btn-pref-save" id="btnSavePreferences">
+                            <i class="fas fa-save"></i> Save Learning Preferences
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal Prompt Dialogue for Start Lesson / Concept Entry -->
+    <div id="lessonPromptModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); z-index:100; align-items:center; justify-content:center;">
+        <div class="quiz-card fade-in" style="width:100%; max-width:480px; background:var(--bg-sidebar);">
+            <h3 style="margin-bottom:12px;"><i class="fas fa-book-open" style="color:var(--accent-primary);"></i> Start Concept Lesson</h3>
+            <p style="color:var(--text-secondary); font-size:13px; margin-bottom:16px;">What concept or chapter would you like to learn today? (e.g. Standard Normal Distribution, Derivatives, Cellular Respiration)</p>
+            <div class="preference-group" style="margin-bottom:20px;">
+                <input type="text" class="preference-input" id="lessonConceptInput" placeholder="Enter topic name...">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button class="btn-sidebar-action" id="btnCancelLessonModal" style="width:auto;">Cancel</button>
+                <button class="btn-sidebar-action primary" id="btnSubmitLessonModal" style="width:auto;">Start Learning</button>
+            </div>
+        </div>
     </div>
 
     <!-- Scripts -->
-    <script src="/static/script.js"></script>
+    <script src="/static/script.js?v=2.0"></script>
 </body>
 </html>

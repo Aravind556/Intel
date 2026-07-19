@@ -1,224 +1,292 @@
-# 📚 Notionary: AI-Powered Interactive Learning Assistant
+# AI Tutor — Intelligent Educational Platform
 
-## 🚀 Overview
+An AI-powered educational platform built on a two-agent cooperative architecture that teaches students like an experienced human teacher — not just answering questions, but delivering structured lessons, generating adaptive assessments, diagnosing misconceptions, and tracking conceptual mastery.
 
-**Notionary** is an advanced, AI-powered backend platform that empowers educators and students by enabling real-time, document-specific doubt resolution through LLMs and secure vector search. Built with **FastAPI**, **Ollama**, **Google Gemini** and **Supabase**, this system is designed to handle contextual Q\&A from uploaded PDFs with high precision and strict data isolation.
+Built with **FastAPI**, **Hugging Face BGE-M3**, **Groq (Llama 3.3 70B)**, **Google Gemini**, and **Supabase (PostgreSQL + pgvector)**.
 
-> "Notionary is not just an assistant—it's your classroom companion, ensuring every student gets the help they need from the material they trust."
-> 
+---
 
-## 💡 Why Notionary Matters
+## Table of Contents
 
-Modern classrooms struggle with:
+- [Architecture](#architecture)
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [API Reference](#api-reference)
+- [Getting Started](#getting-started)
+- [Future Extensions](#future-extensions)
 
-* ❓ **Generic Responses** from traditional AI tools
-* 🧠 **Information Overload**
-* 🔐 **Data Privacy Concerns**
-* 🧪 **Hallucinations** in AI answers
+---
 
-**Notionary solves these problems through:**
+## Architecture
 
-* 🔍 Context-grounded answers using *only* user-uploaded content
-* 🧬 Local embeddings via **Ollama** for performance and privacy
-* 🔒 **Row-Level Security (RLS)** in Supabase for strict user isolation
-* 🧠 LLMs (Gemini) instructed with **strict prompting** to avoid hallucination
+The platform separates teaching logic from retrieval logic through two cooperative agents communicating over a structured service boundary.
 
-## 🌟 Key Features
-
-### 📄 Document-Specific QA
-
-* Ask questions about specific PDFs or search across all documents
-* Get source-cited responses from the relevant page and file
-
-### 🤖 Local Embeddings (Ollama)
-
-* 768-dimensional embeddings generated locally
-* Fast and private with no cloud dependency
-
-### 🧠 Gemini LLM Integration
-
-* Accurate and concise answers
-* Strict prompting to avoid general knowledge outside the document
-
-### 🎯 Smart Context Retrieval
-
-* Embedding-based semantic search
-* Custom similarity threshold and chunk filtering
-
-### 🌐 Enhanced Web Interface
-
-* Upload, manage and interact with PDFs in a modern UI
-* PDF selector with real-time document status
-
-### 📊 Processing Dashboard
-
-* Track upload, embedding, and availability status
-
-### 🔒 Complete User Isolation
-
-* Full RLS enforcement: each user sees only their own PDFs and data
-* Secure authentication with Supabase JWT
-
-### 🚫 Strict Document-Only Mode
-
-* If LLM finds no relevant context, it **refuses** to generate general knowledge
-* Clear citation and reference model for transparency
-
-## 🏁 Quick Start Guide
-
-### ✅ Prerequisites
-
-* Python 3.8+
-* [Ollama](https://ollama.ai/download)
-* [Supabase](https://supabase.com)
-* Google Gemini API Key (free tier available)
-
-### 🔧 Installation Steps
-
-#### 1. Install Ollama
-
-```bash
-# macOS
-brew install ollama
-
-# Windows
-winget install ollama
-
-# Linux
-curl -fsSL https://ollama.ai/install.sh | sh
+```
+   Student (Frontend)
+     │
+     ▼
+┌──────────────────────────────────────────────────┐
+│                 AI Tutor Agent                   │
+│  Intent Recognition · Concept Teaching           │
+│  Doubt Resolution   · Quiz Generation            │
+│  Answer Evaluation  · Misconception Diagnosis    │
+│  Mastery Tracking   · Adaptive Difficulty        │
+└────────────────────────┬─────────────────────────┘
+                         │  Requests curated context
+                         ▼
+┌──────────────────────────────────────────────────┐
+│               Retrieval Agent                    │
+│  Strategy Routing   · Metadata Filtering         │
+│  Dense Vector Search (BGE-M3)                    │
+│  Sparse BM25 Search (PostgreSQL FTS)             │
+│  Reciprocal Rank Fusion (k=60)                   │
+│  Cross-Encoder Reranking (bge-reranker-v2-m3)    │
+│  Sibling Context Expansion                       │
+└────────────────────────┬─────────────────────────┘
+                         │  Queries content & metadata
+                         ▼
+┌──────────────────────────────────────────────────┐
+│               Knowledge Base                     │
+│  Supabase PostgreSQL · pgvector                  │
+│  PDF Documents       · Chunked Embeddings (768d) │
+│  Student Profiles    · Mastery Records           │
+│  Assessment History  · Learning Preferences      │
+└──────────────────────────────────────────────────┘
 ```
 
-Start the Ollama service:
+**Design Principle:** The AI Tutor Agent never directly accesses the database or generates embeddings. The Retrieval Agent never generates explanations or conversational responses. Each component has a single, clearly defined responsibility.
 
-```bash
-ollama serve
-ollama pull nomic-embed-text
+---
+
+## Features
+
+### Conversational Tutoring
+- Structured lesson delivery following a progressive teaching flow: **Prerequisites → Concept Explanation → Analogy → Worked Example → Comprehension Check**
+- Multi-turn conversational context maintained across the session
+- Strict document grounding — the system refuses to answer from general knowledge when retrieved context is insufficient, citing the limitation explicitly
+
+### Advanced Hybrid RAG Pipeline
+- **Dense vector search** using local BAAI/bge-m3 embeddings (1024-dim, normalized to 768-dim) running on GPU
+- **Sparse BM25 search** via PostgreSQL full-text search indexes
+- **Reciprocal Rank Fusion (RRF)** combining dense and sparse candidate rankings (k=60)
+- **Cross-encoder reranking** using local BAAI/bge-reranker-v2-m3 for high-precision passage selection
+- **Sibling context expansion** — retrieves neighboring chunks around top-ranked candidates for coherent context
+
+### Dynamic Assessment & Evaluation
+- MCQ, subjective, and coding question generation calibrated to configurable difficulty levels
+- Batch quiz generation for full assessments across multiple concepts
+- **Rubric-based evaluation** — not binary correct/incorrect grading
+- **Misconception diagnosis** — classifies errors into Foundational, Execution, Logic, and Vocabulary categories
+- Corrective feedback with specific revision topic recommendations
+
+### Student Mastery Tracking
+- Per-concept mastery scores (0.0–1.0) tracked over time with test count and timestamp metadata
+- Mastery scores updated automatically after each quiz evaluation
+- Visual mastery dashboard in the frontend
+
+### PDF Processing Pipeline
+- Drag-and-drop PDF upload with real-time progress tracking
+- Automated text extraction with semantic paragraph chunking (800–1200 characters, 150-character overlap)
+- BGE-M3 embedding generation for all extracted chunks
+- Performance profiling instrumented across extraction, embedding, and database persistence phases
+- File validation (50MB limit, PDF format verification)
+
+### Student Learning Preferences
+- Configurable analogy style (practical, abstract, visual)
+- Adjustable explanation depth (brief, medium, detailed)
+- Preferred coding language for worked examples
+- Preferences stored per-user and injected into tutoring prompts
+
+### Authentication & Data Isolation
+- Session-based authentication with cookie management (register, login, logout, password change)
+- Row-Level Security (RLS) enforcement on Supabase — each user's PDFs, assessments, and profiles are fully isolated
+
+### Legacy Doubt Solver
+- Direct document Q&A endpoint (`/api/v1/ask`) with source-cited responses
+- Strict document-only mode — refuses to generate answers when context is insufficient
+
+---
+
+## Tech Stack
+
+| Component | Technology | Details |
+|-----------|-----------|---------|
+| Backend Framework | FastAPI | Async Python web framework |
+| Database | Supabase | PostgreSQL + pgvector + Row-Level Security |
+| Dense Embeddings | BAAI/bge-m3 | Local GPU inference via sentence-transformers |
+| Cross-Encoder Reranker | BAAI/bge-reranker-v2-m3 | Local GPU inference via transformers |
+| LLM (Tutor Agent) | Groq | Llama 3.3 70B Versatile |
+| LLM (Doubt Solver) | Google Gemini | Gemini 1.5 Flash / Pro |
+| Package Manager | uv | Rust-based Python package management (Astral) |
+| Frontend | Vanilla HTML/CSS/JS | Dark-themed UI with glassmorphism design |
+
+**Model Evolution:** The embedding system was migrated from Ollama (`nomic-embed-text`, 768-dim) to Hugging Face BGE-M3 (1024-dim, sliced to 768-dim) for improved retrieval accuracy and multilingual support. The retrieval pipeline was upgraded from naive vector search to a full hybrid RAG system with RRF fusion and cross-encoder reranking.
+
+---
+
+## Project Structure
+
+```
+Intel/
+├── AGENTS.md                          # Project specification
+├── README.md
+├── pyproject.toml
+├── requirements.txt
+├── run_server.py                      # Application entry point
+│
+├── api/
+│   └── main.py                        # FastAPI route definitions
+│
+├── core/
+│   ├── simple_auth.py                 # Session-based authentication
+│   └── database/
+│       ├── config.py                  # Supabase connection configuration
+│       ├── manager.py                 # PDFDatabaseManager (all DB operations)
+│       ├── setup.sql                  # Initial database schema
+│       ├── migration_tutor_profiles.sql
+│       ├── migration_user_pdfs.sql
+│       └── run_migrations.py
+│
+├── modules/
+│   ├── agents/
+│   │   ├── retrieval_agent.py         # Hybrid RAG, RRF fusion, cross-encoder reranking
+│   │   └── tutor_agent.py             # Teaching, quiz generation, evaluation
+│   ├── doubt_solver/
+│   │   └── services/                  # Legacy Q&A pipeline
+│   └── pdf_processor/
+│       ├── models/pdf_models.py       # Pydantic data models
+│       └── services/                  # Text extraction, embedding generation
+│
+├── utils/
+│   └── performance_monitor.py         # PDF pipeline profiler
+│
+├── frontend/
+│   ├── index.html / style.css / script.js   # Main application
+│   └── auth.html / auth.css / auth.js       # Authentication pages
+│
+├── tests/
+│   ├── test_retrieval.py              # Retrieval agent integration test
+│   ├── test_verify_tutor.py           # Agent initialization verification
+│   └── check_db.py                    # Database inspection utility
+│
+└── docs/                              # Design documentation (not tracked in git)
+    ├── system_architecture.md
+    ├── implementation.md
+    ├── learning.md
+    └── future_extensions_research.md
 ```
 
-#### 2. Python Environment Setup
+---
+
+## API Reference
+
+### Authentication
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/auth/register` | Register a new user |
+| `POST` | `/api/v1/auth/login` | Authenticate with email and password |
+| `POST` | `/api/v1/auth/logout` | Terminate current session |
+| `GET` | `/api/v1/auth/profile` | Retrieve authenticated user profile |
+| `POST` | `/api/v1/auth/change-password` | Update password |
+
+### Tutoring
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/tutor/start-lesson` | Begin a structured lesson on a concept |
+| `POST` | `/api/v1/tutor/chat` | Continue conversation during a lesson or doubt-solving turn |
+| `POST` | `/api/v1/tutor/quiz` | Generate quiz questions (MCQ, subjective, coding) |
+| `POST` | `/api/v1/tutor/evaluate` | Submit an answer for rubric-based evaluation |
+
+### Student Profile
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/profile/mastery` | Retrieve mastery scores for all tested concepts |
+| `GET` | `/api/v1/profile/preferences` | Retrieve learning preferences |
+| `POST` | `/api/v1/profile/preferences` | Update learning preferences |
+
+### PDF Management
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/pdfs/upload` | Upload and process a PDF document |
+| `GET` | `/api/v1/pdfs` | List all PDFs for the authenticated user |
+| `GET` | `/api/v1/pdfs/{pdf_id}` | Retrieve details for a specific PDF |
+| `DELETE` | `/api/v1/pdfs/{pdf_id}` | Delete a PDF and its associated chunks |
+| `GET` | `/api/v1/pdfs/stats` | Retrieve PDF processing statistics |
+
+### Legacy Doubt Solver
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/ask` | Submit a document-grounded question |
+| `GET` | `/api/v1/analyze/{question}` | Analyze question intent and complexity |
+
+---
+
+## Getting Started
+
+### Prerequisites
+- Python 3.11+
+- CUDA-capable GPU (required for local BGE-M3 embeddings and cross-encoder reranking)
+- [Supabase](https://supabase.com) project with the pgvector extension enabled
+- [Groq API Key](https://console.groq.com)
+- [Google Gemini API Key](https://aistudio.google.com/apikey)
+
+### Installation
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
+git clone https://github.com/Aravind556/Intel.git
+cd Intel
+
+# Create and activate virtual environment
+uv venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+uv pip install -r requirements.txt
 ```
 
-#### 3. Configuration
+### Configuration
 
-Create a `.env` file:
+Create a `.env` file in the project root:
 
 ```env
-SUPABASE_URL=your_url
-SUPABASE_KEY=your_anon_key
-SUPABASE_SERVICE_KEY=your_service_key
-GEMINI_API_KEY=your_gemini_key
-DATABASE_URL=postgresql://... (optional)
+SUPABASE_URL=<your_supabase_project_url>
+SUPABASE_KEY=<your_supabase_anon_key>
+SUPABASE_SERVICE_KEY=<your_supabase_service_role_key>
+GROQ_API_KEY=<your_groq_api_key>
+GEMINI_API_KEY=<your_gemini_api_key>
 ```
 
-#### 4. Start the Server
+### Running the Server
 
 ```bash
-ollama serve
 python run_server.py
 ```
 
-Visit:
+| Resource | URL |
+|----------|-----|
+| Application | http://localhost:8000/frontend |
+| API Documentation | http://localhost:8000/docs |
+| Health Check | http://localhost:8000/health |
 
-* 🌐 UI: `http://localhost:8000/frontend`
-* 📚 API Docs: `http://localhost:8000/docs`
-* 💚 Health: `http://localhost:8000/health`
+---
 
+## Future Extensions
 
-## ❓ How to Use
+The architecture is designed to support the following capabilities without requiring major redesign:
 
-### 📤 Upload PDFs
+- **Voice Conversations** — Web Speech API for real-time STT with Faster-Whisper server-side fallback
+- **OCR for Scanned PDFs** — Tesseract, EasyOCR, or Surya integration as a fallback in the text extraction pipeline
+- **Diagram Explanation** — Multimodal LLM support for visual content understanding
+- **Knowledge Graphs** — Structured concept relationship mapping across textbooks
+- **Adaptive Revision Planning** — Spaced repetition scheduling based on mastery decay curves
 
-* Drag & drop files into the UI
-* Embeddings are generated using Ollama
-* Each file is user-scoped
+---
 
-### 💬 Ask Questions
+## License
 
-**Option A: Web UI**
+This project is developed as part of the Intel AIoT initiative.
 
-* Select a document and type a query
-* Get sourced answers
+## Contact
 
-**Option B: API**
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/ask" -H "Content-Type: application/json" -d '{"question": "What is X?", "document_id": "..."}'
-```
-
-### 🚫 Strict Mode Example
-
-> "Who is Ramanujan?" → "The selected document does not contain information about Ramanujan."
-
-## 🧬 Architecture
-
-```
-+------------+       REST        +-----------+
-|  Frontend  | <---------------> |  FastAPI  |
-+------------+                   +-----------+
-                                  |   |   |
-                             Embedding  LLM
-                             (Ollama)  (Gemini)
-                                  |
-                            +-----------+
-                            | Supabase  |
-                            +-----------+
-```
-
-## 🛠️ Project Structure
-
-```
-ai-tutor-backend/
-├── api/                      # FastAPI routes
-├── core/                     # DB + config
-├── modules/                  # PDF and AI logic
-├── frontend/                 # Static web interface
-├── tests/                    # Test suite
-├── run_server.py             # Entry point
-└── .env                      # Environment vars
-```
-
-## 🧪 Test Coverage
-
-* ✅ PDF Upload
-* ✅ User RLS Enforcement
-* ✅ Document-only LLM Answers
-* ✅ No General Knowledge Leakage
-* ✅ Chunk Filtering
-
-Test scripts:
-
-* `test_strict_document_mode.py`
-* `test_subjects_endpoint.py`
-* `debug_document_restriction.py`
-
-## 📈 Scaling & Cost
-
-* **Local Embeddings**: Free with Ollama
-* **Gemini API**: Free tier (15 req/min)
-* **Supabase Free Tier**: 500MB storage, 2GB bandwidth
-
-Estimated Monthly Cost: `$0 – $3` for moderate usage
-
-## 🔮 Future Plans
-
-* [ ] Mobile App
-* [ ] Add Proctored Mode for examinations
-* [ ] Analytics Dashboard
-* [ ] Claude / GPT Integration
-* [ ] Multi-language Support
-* [ ] Teacher Dashboard
-
-## 🤝 Contributing
-
-PRs are welcome! Please follow conventions, write clean code and add tests.
-
-## 📬 Contact
-
-For support or feedback:
-
-* Open an [issue](https://github.com/Aravind556/Intel/issues)
+For issues or feedback, please open an [issue](https://github.com/Aravind556/Intel/issues).

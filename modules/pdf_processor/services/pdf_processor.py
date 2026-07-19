@@ -52,6 +52,10 @@ class PDFProcessor:
         Returns:
             ProcessingResponse with results and status
         """
+        from utils.performance_monitor import PDFProcessingProfiler
+        profiler = PDFProcessingProfiler()
+        profiler.start_profiling()
+        
         start_time = time.time()
         pdf_id = None
         
@@ -167,9 +171,10 @@ class PDFProcessor:
             # Step 1: Extract text from PDF
             logger.info("📖 Step 1: Starting text extraction...")
             try:
-                chunks_data, extraction_metadata = await self.text_extractor.extract_text(
-                    file_content, original_filename
-                )
+                with profiler.profile_phase("text_extraction"):
+                    chunks_data, extraction_metadata = await self.text_extractor.extract_text(
+                        file_content, original_filename
+                    )
                 
                 if not chunks_data:
                     raise ValueError("No text content extracted from PDF")
@@ -196,7 +201,8 @@ class PDFProcessor:
             # Step 2: Generate embeddings
             logger.info("🔮 Step 2: Starting embedding generation...")
             try:
-                chunks_with_embeddings = await self.embedding_generator.generate_embeddings(chunks_data)
+                with profiler.profile_phase("embedding_generation"):
+                    chunks_with_embeddings = await self.embedding_generator.generate_embeddings(chunks_data)
                 logger.info(f"✅ Generated embeddings for {original_filename}")
                 
             except Exception as e:
@@ -246,7 +252,8 @@ class PDFProcessor:
                     }
                     chunk_dicts.append(chunk_dict)
                 
-                success = await self.db_manager.batch_create_chunks(chunk_dicts)
+                with profiler.profile_phase("database_save"):
+                    success = await self.db_manager.batch_create_chunks(chunk_dicts)
                 if not success.get('success', False):
                     raise ValueError(f"Failed to save chunks to database: {success.get('error', 'Unknown error')}")
                 logger.info("✅ Chunks saved to database successfully")
@@ -274,6 +281,9 @@ class PDFProcessor:
             )
             logger.info("✅ Status updated to COMPLETED")
             
+            profiler.stop_profiling()
+            logger.info(f"📊 Performance summary: {profiler.metrics}")
+            
             processing_time = time.time() - start_time
             
             logger.info(f"🎉 Successfully processed {original_filename} in {processing_time:.2f}s")
@@ -288,6 +298,9 @@ class PDFProcessor:
             )
             
         except Exception as e:
+            profiler.stop_profiling()
+            logger.error(f"⚠️ Failed performance state: {profiler.metrics}")
+            
             processing_time = time.time() - start_time
             error_msg = f"Unexpected error during PDF processing: {str(e)}"
             

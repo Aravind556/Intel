@@ -220,6 +220,22 @@ Provide a clear, pedagogical answer based only on the study context."""
             
         evidence_text = "\n\n".join([f"Source: {c['pdf_title']} (Page {c['page_number']})\n{c['content']}" for c in evidence])
         
+        options_instruction = ""
+        if question_type == "mcq":
+            options_instruction = """
+- "options": {
+    "A": "Content for option A",
+    "B": "Content for option B",
+    "C": "Content for option C",
+    "D": "Content for option D"
+  }
+Note: Ensure there is exactly one correct option, and the options should cover plausible student mistakes/distractors.
+"""
+        else:
+            options_instruction = """
+- "options": null
+"""
+
         system_prompt = f"""You are a Calibrated Quiz Designer.
 Objective: Generate a question of type '{question_type}' on '{concept}' calibrated to difficulty level {difficulty} (out of 5).
 
@@ -231,9 +247,10 @@ Difficulty Scale Guidelines:
 - Level 5: Edge-cases, optimization, or debugging.
 
 Output the response in structured JSON with these exact keys:
-- "question": "The text of the question (include choices A, B, C, D if MCQ)."
+- "question": "The text of the question (excluding option choices)."
+{options_instruction}
 - "rubric": {{
-    "ideal_answer": "The target correct answer.",
+    "ideal_answer": "{"The correct option letter ('A', 'B', 'C', or 'D')" if question_type == "mcq" else "The target correct answer."}",
     "milestones": ["List of core points or steps the student must hit."],
     "misconceptions": [
         {{"code": "MISC_FOUNDATION", "condition": "Student fails to state basic prerequisite X."}},
@@ -264,6 +281,7 @@ Generate a calibrated {question_type} question on '{concept}'."""
             return {
                 "success": True,
                 "question": quiz_data.get("question"),
+                "options": quiz_data.get("options"),
                 "rubric": quiz_data.get("rubric"),
                 "difficulty": difficulty
             }
@@ -273,6 +291,170 @@ Generate a calibrated {question_type} question on '{concept}'."""
                 "success": False,
                 "error": str(e)
             }
+
+    async def generate_quiz_batch(
+        self,
+        student_id: str,
+        concept: Optional[str] = None,
+        question_type: str = "mcq",
+        num_questions: int = 5,
+        document_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Generates a batch of quiz questions in increasing difficulty level.
+        The questions are strictly grounded in the selected document (if document_id is provided).
+        """
+        import asyncio
+        logger.info(f"Generating batch of {num_questions} {question_type} quiz questions on {concept} for student {student_id} from doc {document_id}")
+        
+        # 1. Determine retrieval query
+        query_text = concept or ""
+        if not query_text and document_id:
+            # Fetch document info to use filename as a query
+            doc_info = await self.db_manager.get_pdf_document(document_id, user_id=student_id)
+            if doc_info:
+                query_text = doc_info.get("original_filename", "document contents")
+            else:
+                query_text = "document contents"
+
+        # 2. Retrieve Evidence
+        retrieval_res = await self.retrieval_agent.retrieve_context(
+            intent="generate_quiz",
+            query=query_text,
+            user_id=student_id,
+            match_count=10,  # Get more chunks for a batch
+            scope={"document_id": document_id} if document_id else {}
+        )
+        evidence = retrieval_res.get("evidence", [])
+        
+        # Fallback: Query chunks from this pdf directly using service_client to ensure strict grounding
+        if not evidence and document_id:
+            try:
+                chunks_res = self.db_manager.service_client.table("document_chunks") \
+                    .select("id, content, page_number, chunk_index, pdf_id, pdf_documents(original_filename)") \
+                    .eq("pdf_id", document_id) \
+                    .limit(10) \
+                    .execute()
+                if chunks_res.data:
+                    evidence = []
+                    for row in chunks_res.data:
+                        pdf_doc = row.get("pdf_documents", {}) or {}
+                        evidence.append({
+                            "id": row.get("id"),
+                            "content": row.get("content"),
+                            "page_number": row.get("page_number"),
+                            "chunk_index": row.get("chunk_index"),
+                            "pdf_title": pdf_doc.get("original_filename", "Selected Document"),
+                            "pdf_id": row.get("pdf_id")
+                        })
+            except Exception as e:
+                logger.error(f"Fallback direct chunk retrieval failed: {e}")
+
+        if not evidence:
+            return {
+                "success": False,
+                "error": "No learning materials found to generate a quiz from."
+            }
+
+        evidence_text = "\n\n".join([f"Source: {c['pdf_title']} (Page {c['page_number']})\n{c['content']}" for c in evidence])
+
+        # Define an inner helper function to generate a single question of a specific difficulty
+        async def generate_single(idx: int, diff: int):
+            options_instruction = ""
+            if question_type == "mcq":
+                options_instruction = """
+- "options": {
+    "A": "Content for option A",
+    "B": "Content for option B",
+    "C": "Content for option C",
+    "D": "Content for option D"
+  }
+Note: Ensure there is exactly one correct option, and the options should cover plausible student mistakes/distractors.
+"""
+            else:
+                options_instruction = """
+- "options": null
+"""
+
+            system_prompt = f"""You are a Calibrated Quiz Designer.
+Objective: Generate a question of type '{question_type}' based strictly on the provided textbook context.
+The question must be calibrated to difficulty level {diff} (out of 5).
+
+Difficulty Scale Guidelines:
+- Level 1: Direct definition recall.
+- Level 2: Simple conceptual matching or fill-in-the-blank.
+- Level 3: Calculation or step-by-step procedural check.
+- Level 4: Synthesis, scenario analysis, or guided coding.
+- Level 5: Edge-cases, optimization, or debugging.
+
+Output the response in structured JSON with these exact keys:
+- "question": "The text of the question (excluding option choices)."
+{options_instruction}
+- "rubric": {{
+    "ideal_answer": "{"The correct option letter ('A', 'B', 'C', or 'D')" if question_type == "mcq" else "The target correct answer."}",
+    "milestones": ["List of core points or steps the student must hit."],
+    "misconceptions": [
+        {{"code": "MISC_FOUNDATION", "condition": "Student fails to state basic prerequisite X."}},
+        {{"code": "MISC_EXECUTION", "condition": "Student applies mathematical calculation error."}},
+        {{"code": "MISC_LOGIC", "condition": "Student has correct facts but invalid reasoning."}},
+        {{"code": "MISC_VOCAB", "condition": "Student mixes up vocab terms."}}
+    ]
+}}
+"""
+            user_prompt = f"""Textbook context:
+{evidence_text}
+
+Generate a calibrated {question_type} question of difficulty {diff} (1-5) strictly grounded in the textbook context above."""
+            
+            try:
+                chat_completion = self.client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    model=self.model_name,
+                    response_format={"type": "json_object"},
+                    temperature=0.6 + (idx * 0.05) # slight temperature variance
+                )
+                quiz_data = json.loads(chat_completion.choices[0].message.content)
+                return {
+                    "question_number": idx + 1,
+                    "difficulty": diff,
+                    "question": quiz_data.get("question"),
+                    "options": quiz_data.get("options"),
+                    "ideal_answer": quiz_data.get("rubric", {}).get("ideal_answer"),
+                    "rubric": quiz_data.get("rubric")
+                }
+            except Exception as e:
+                logger.error(f"Error generating question {idx + 1}: {e}")
+                return None
+
+        # 3. Create tasks with increasing difficulties
+        # Scale difficulties from 1 to 5 based on num_questions
+        tasks = []
+        for i in range(num_questions):
+            # Map index to difficulty: linear scaling from 1 to 5
+            if num_questions > 1:
+                diff = int(1 + (i / (num_questions - 1)) * 4)
+            else:
+                diff = 3
+            diff = min(5, max(1, diff))
+            tasks.append(generate_single(i, diff))
+
+        # Run tasks concurrently!
+        results = await asyncio.gather(*tasks)
+        questions = [r for r in results if r is not None]
+
+        if not questions:
+            return {
+                "success": False,
+                "error": "Failed to generate any questions."
+            }
+
+        return {
+            "success": True,
+            "questions": questions
+        }
 
     async def evaluate_answer(
         self,

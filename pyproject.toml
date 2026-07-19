@@ -1,0 +1,15 @@
+[project]
+name = "intel"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "faiss-cpu>=1.14.3",
+    "flagembedding>=1.4.0",
+    "huggingface-hub>=1.24.0",
+    "rank-bm25>=0.2.2",
+    "sentence-transformers>=5.6.0",
+    "torch>=2.13.0",
+    "transformers>=5.14.1",
+]

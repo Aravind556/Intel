@@ -588,8 +588,8 @@ class PDFDatabaseManager:
             result = self.service_client.table("document_chunks") \
                 .select("id, content, metadata, page_number, chunk_index, pdf_id, pdf_documents!inner(original_filename, user_id)") \
                 .eq("pdf_documents.user_id", user_id) \
-                .text_search("content", query_text) \
                 .limit(match_count) \
+                .text_search("content", query_text, options={"type": "web_search"}) \
                 .execute()
             
             search_results = []
