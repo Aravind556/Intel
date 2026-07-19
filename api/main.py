@@ -16,6 +16,9 @@ from modules.doubt_solver.services.response_generator import ResponseGenerator
 from modules.pdf_processor.services.pdf_processor import PDFProcessor
 from modules.pdf_processor.models.pdf_models import ProcessingResponse, PDFDocument
 from simple_auth import SimpleAuth
+from modules.agents.retrieval_agent import RetrievalAgent
+from modules.agents.tutor_agent import AITutorAgent
+
 
 app = FastAPI(
     title="AI Tutor Backend",
@@ -38,6 +41,8 @@ db_manager = None
 response_generator = None
 pdf_processor = None
 auth_system = SimpleAuth()
+tutor_agent = None
+retrieval_agent = None
 
 # Authentication Models
 class RegisterRequest(BaseModel):
@@ -100,6 +105,28 @@ class ChangePasswordRequest(BaseModel):
 class SessionRequest(BaseModel):
     session_id: str
 
+class StartLessonRequest(BaseModel):
+    concept: str
+    session_id: Optional[str] = None
+
+class TutorChatRequest(BaseModel):
+    message: str
+    session_id: str
+    concept: Optional[str] = None
+
+class QuizRequest(BaseModel):
+    concept: str
+    question_type: str = "mcq"
+
+class EvaluateRequest(BaseModel):
+    concept: str
+    question_text: str
+    student_answer: str
+    rubric: Dict[str, Any]
+
+class PreferencesRequest(BaseModel):
+    preferences: Dict[str, Any]
+
 # Dependency to get database manager
 async def get_db_manager():
     global db_config, db_manager
@@ -124,6 +151,21 @@ async def get_pdf_processor():
         pdf_processor = PDFProcessor()
         print("✅ Created new PDF processor instance")
     return pdf_processor
+
+async def get_retrieval_agent():
+    global retrieval_agent
+    if retrieval_agent is None:
+        db_mgr = await get_db_manager()
+        retrieval_agent = RetrievalAgent(db_mgr)
+    return retrieval_agent
+
+async def get_tutor_agent():
+    global tutor_agent
+    if tutor_agent is None:
+        db_mgr = await get_db_manager()
+        ret_agent = await get_retrieval_agent()
+        tutor_agent = AITutorAgent(db_mgr, ret_agent)
+    return tutor_agent
 
 # Authentication dependency
 async def get_current_user(session_id: Optional[str] = Cookie(None)):
@@ -594,6 +636,98 @@ async def change_password(
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Password change failed: {str(e)}")
+
+# =============================================================================
+# AI TUTOR AGENT ENDPOINTS
+# =============================================================================
+
+@app.post("/api/v1/tutor/start-lesson")
+async def api_start_lesson(
+    request: StartLessonRequest,
+    user_data: dict = Depends(get_current_user),
+    tutor: AITutorAgent = Depends(get_tutor_agent)
+):
+    """Start a structured concept-building tutoring flow."""
+    session_id = request.session_id or str(uuid.uuid4())
+    result = await tutor.start_lesson(
+        student_id=user_data["id"],
+        concept=request.concept,
+        session_id=session_id
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
+
+@app.post("/api/v1/tutor/chat")
+async def api_tutor_chat(
+    request: TutorChatRequest,
+    user_data: dict = Depends(get_current_user),
+    tutor: AITutorAgent = Depends(get_tutor_agent)
+):
+    """Interact with the AI Tutor or ask doubts, strictly grounded in PDFs."""
+    result = await tutor.process_message(
+        student_id=user_data["id"],
+        message=request.message,
+        session_id=request.session_id,
+        current_concept=request.concept
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
+
+@app.post("/api/v1/tutor/quiz")
+async def api_generate_quiz(
+    request: QuizRequest,
+    user_data: dict = Depends(get_current_user),
+    tutor: AITutorAgent = Depends(get_tutor_agent)
+):
+    """Generate a quiz question (MCQ, Subjective, or Coding) calibrated to mastery."""
+    result = await tutor.generate_quiz(
+        student_id=user_data["id"],
+        concept=request.concept,
+        question_type=request.question_type
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
+
+@app.post("/api/v1/tutor/evaluate")
+async def api_evaluate_answer(
+    request: EvaluateRequest,
+    user_data: dict = Depends(get_current_user),
+    tutor: AITutorAgent = Depends(get_tutor_agent)
+):
+    """Grade student answer, diagnose misconceptions, and update mastery state."""
+    result = await tutor.evaluate_answer(
+        student_id=user_data["id"],
+        concept=request.concept,
+        question_text=request.question_text,
+        student_answer=request.student_answer,
+        rubric=request.rubric
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
+
+@app.get("/api/v1/profile/mastery")
+async def api_get_mastery_profile(
+    user_data: dict = Depends(get_current_user),
+    db_mgr: PDFDatabaseManager = Depends(get_db_manager)
+):
+    """Fetch mastery level scores across all concepts for the student."""
+    mastery_list = await db_mgr.list_student_mastery(user_data["id"])
+    return {"success": True, "mastery": mastery_list}
+
+@app.post("/api/v1/profile/preferences")
+async def api_update_preferences(
+    request: PreferencesRequest,
+    user_data: dict = Depends(get_current_user),
+    db_mgr: PDFDatabaseManager = Depends(get_db_manager)
+):
+    """Insert or update student learning preferences."""
+    result = await db_mgr.upsert_student_profile(user_data["id"], request.preferences)
+    return result
+
 
 # Static file serving - only mount if directory exists
 if os.path.exists("frontend"):

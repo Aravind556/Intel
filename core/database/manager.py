@@ -433,3 +433,181 @@ class PDFDatabaseManager:
         except Exception as e:
             print(f"Error getting PDF overview: {e}")
             return []
+
+    # ===== AI TUTOR STUDENT PROFILE =====
+
+    async def get_student_profile(self, student_id: str) -> Optional[Dict[str, Any]]:
+        """Get student learning preferences profile"""
+        try:
+            result = self.service_client.table("student_profiles").select("*").eq("id", student_id).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"Error getting student profile: {e}")
+            return None
+
+    async def upsert_student_profile(self, student_id: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Insert or update student learning preferences profile"""
+        try:
+            result = self.service_client.table("student_profiles").upsert({
+                "id": student_id,
+                "learning_preferences": preferences,
+                "updated_at": "now()"
+            }).execute()
+            return {"success": True, "data": result.data[0]}
+        except Exception as e:
+            print(f"Error upserting student profile: {e}")
+            return {"success": False, "error": str(e)}
+
+    # ===== TOPIC MASTERY TRACKING =====
+
+    async def get_topic_mastery(self, student_id: str, concept_name: str) -> Optional[Dict[str, Any]]:
+        """Get student mastery level for a specific concept"""
+        try:
+            result = self.service_client.table("student_topic_mastery").select("*") \
+                .eq("student_id", student_id).eq("concept_name", concept_name).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            print(f"Error getting topic mastery: {e}")
+            return None
+
+    async def update_topic_mastery(self, student_id: str, concept_name: str, score: float) -> Dict[str, Any]:
+        """Update student mastery level for a specific concept"""
+        try:
+            # First check if record exists
+            existing = await self.get_topic_mastery(student_id, concept_name)
+            
+            if existing:
+                times_tested = existing.get("times_tested", 0) + 1
+                result = self.service_client.table("student_topic_mastery").update({
+                    "mastery_score": min(1.0, max(0.0, score)),
+                    "times_tested": times_tested,
+                    "last_tested_at": "now()"
+                }).eq("student_id", student_id).eq("concept_name", concept_name).execute()
+            else:
+                result = self.service_client.table("student_topic_mastery").insert({
+                    "student_id": student_id,
+                    "concept_name": concept_name,
+                    "mastery_score": min(1.0, max(0.0, score)),
+                    "times_tested": 1,
+                    "last_tested_at": "now()"
+                }).execute()
+                
+            return {"success": True, "data": result.data[0]}
+        except Exception as e:
+            print(f"Error updating topic mastery: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def list_student_mastery(self, student_id: str) -> List[Dict[str, Any]]:
+        """List mastery levels across all concepts for a student"""
+        try:
+            result = self.service_client.table("student_topic_mastery").select("*").eq("student_id", student_id).execute()
+            return result.data if result.data else []
+        except Exception as e:
+            print(f"Error listing student mastery: {e}")
+            return []
+
+    # ===== ASSESSMENT HISTORY LOGGING =====
+
+    async def log_assessment_history(
+        self,
+        student_id: str,
+        concept_name: str,
+        question_text: str,
+        student_answer: str,
+        is_correct: bool,
+        score: float,
+        misconceptions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Log a student quiz/check answer attempt in history"""
+        try:
+            result = self.service_client.table("student_assessment_history").insert({
+                "student_id": student_id,
+                "concept_name": concept_name,
+                "question_text": question_text,
+                "student_answer": student_answer,
+                "is_correct": is_correct,
+                "score": score,
+                "misconceptions_detected": misconceptions
+            }).execute()
+            return {"success": True, "data": result.data[0]}
+        except Exception as e:
+            print(f"Error logging assessment history: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def get_student_assessment_history(self, student_id: str, concept_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Retrieve student quiz answer attempts"""
+        try:
+            query = self.service_client.table("student_assessment_history").select("*").eq("student_id", student_id)
+            if concept_name:
+                query = query.eq("concept_name", concept_name)
+            result = query.order("created_at", desc=True).execute()
+            return result.data if result.data else []
+        except Exception as e:
+            print(f"Error getting assessment history: {e}")
+            return []
+
+    # ===== GENERAL RETRIEVAL & HYBRID SEARCH SUPPORT =====
+
+    async def search_all_documents(
+        self,
+        query_embedding: List[float],
+        user_id: str,
+        match_threshold: float = 0.5,
+        match_count: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Search across all user's PDF documents using vector similarity"""
+        try:
+            result = self.service_client.rpc("match_all_documents", {
+                "query_embedding": query_embedding,
+                "user_id": user_id,
+                "match_threshold": match_threshold,
+                "match_count": match_count
+            }).execute()
+            
+            search_results = []
+            if result.data:
+                for row in result.data:
+                    search_results.append({
+                        "id": row.get("chunk_id"),
+                        "content": row.get("content"),
+                        "page_number": row.get("page_number"),
+                        "similarity": row.get("similarity"),
+                        "chunk_index": row.get("chunk_index"),
+                        "metadata": row.get("metadata"),
+                        "pdf_title": row.get("pdf_title", "Unknown")
+                    })
+            return search_results
+        except Exception as e:
+            print(f"Error in general vector search: {e}")
+            return []
+
+    async def text_search_all_documents(self, query_text: str, user_id: str, match_count: int = 10) -> List[Dict[str, Any]]:
+        """Perform text search across all PDF documents for a user using FTS"""
+        try:
+            # Query document chunks using text search and join on pdf_documents table
+            result = self.service_client.table("document_chunks") \
+                .select("id, content, metadata, page_number, chunk_index, pdf_id, pdf_documents!inner(original_filename, user_id)") \
+                .eq("pdf_documents.user_id", user_id) \
+                .text_search("content", query_text) \
+                .limit(match_count) \
+                .execute()
+            
+            search_results = []
+            if result.data:
+                for row in result.data:
+                    pdf_doc = row.get("pdf_documents", {})
+                    search_results.append({
+                        "id": row.get("id"),
+                        "content": row.get("content"),
+                        "page_number": row.get("page_number"),
+                        "chunk_index": row.get("chunk_index"),
+                        "metadata": row.get("metadata"),
+                        "pdf_title": pdf_doc.get("original_filename", "Unknown"),
+                        "pdf_id": row.get("pdf_id"),
+                        "similarity": 0.5  # Neutral similarity for text-only search matches
+                    })
+            return search_results
+        except Exception as e:
+            print(f"Error in text search: {e}")
+            return []
+
