@@ -2,7 +2,7 @@
 
 An AI-powered educational platform built on a two-agent cooperative architecture that teaches students like an experienced human teacher — not just answering questions, but delivering structured lessons, generating adaptive assessments, diagnosing misconceptions, and tracking conceptual mastery.
 
-Built with **FastAPI**, **Hugging Face BGE-M3**, **Groq (Llama 3.3 70B)**, **Google Gemini**, and **Supabase (PostgreSQL + pgvector)**.
+Built with **FastAPI**, **Hugging Face BGE-M3**, **Google Gemini**, and **Supabase (PostgreSQL + pgvector)**, **Groq (Llama 3.3 70B)**.
 
 ---
 
