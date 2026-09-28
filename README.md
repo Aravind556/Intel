@@ -1,292 +1,221 @@
-# AI Tutor — Intelligent Educational Platform
+# AI Tutor
 
-An AI-powered educational platform built on a two-agent cooperative architecture that teaches students like an experienced human teacher — not just answering questions, but delivering structured lessons, generating adaptive assessments, diagnosing misconceptions, and tracking conceptual mastery.
+AI Tutor is a document-grounded learning platform that helps students learn from their own course material. It is designed around a simple principle: retrieval supplies evidence, while the tutor supplies teaching.
 
-Built with **FastAPI**, **Hugging Face BGE-M3**, **Google Gemini**, and **Supabase (PostgreSQL + pgvector)**, **Groq (Llama 3.3 70B)**.
+Students can upload PDFs, ask questions, start guided lessons, generate assessments, receive rubric-based feedback, and track concept mastery. The application pairs a FastAPI backend with a lightweight browser interface and stores learning content in Supabase PostgreSQL with pgvector.
 
----
+> **Project status:** active prototype. The core PDF, retrieval, tutoring, quiz, evaluation, profile, and authentication flows are implemented. Review the [Production considerations](#production-considerations) before deploying for real users.
 
-## Table of Contents
+## Contents
 
+- [What it does](#what-it-does)
 - [Architecture](#architecture)
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [API Reference](#api-reference)
-- [Getting Started](#getting-started)
-- [Future Extensions](#future-extensions)
+- [Technology](#technology)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Database setup](#database-setup)
+- [Run the application](#run-the-application)
+- [API overview](#api-overview)
+- [Repository layout](#repository-layout)
+- [Development notes](#development-notes)
+- [Production considerations](#production-considerations)
+- [Roadmap](#roadmap)
 
----
+## What it does
+
+- Uploads and processes PDF learning material.
+- Extracts text, creates overlapping chunks, and produces local BGE-M3 embeddings.
+- Retrieves evidence using vector search, PostgreSQL full-text search, reciprocal-rank fusion, cross-encoder reranking, and nearby-chunk expansion.
+- Delivers guided lessons with explanations, examples, analogies, and comprehension checks.
+- Supports document-grounded doubt solving with source information.
+- Generates MCQ, subjective, and coding quizzes.
+- Evaluates submitted answers against a rubric, identifies misconception categories, and updates per-concept mastery.
+- Stores learner preferences, mastery records, PDFs, and subjects per user.
 
 ## Architecture
 
-The platform separates teaching logic from retrieval logic through two cooperative agents communicating over a structured service boundary.
-
-```
-   Student (Frontend)
-     │
-     ▼
-┌──────────────────────────────────────────────────┐
-│                 AI Tutor Agent                   │
-│  Intent Recognition · Concept Teaching           │
-│  Doubt Resolution   · Quiz Generation            │
-│  Answer Evaluation  · Misconception Diagnosis    │
-│  Mastery Tracking   · Adaptive Difficulty        │
-└────────────────────────┬─────────────────────────┘
-                         │  Requests curated context
-                         ▼
-┌──────────────────────────────────────────────────┐
-│               Retrieval Agent                    │
-│  Strategy Routing   · Metadata Filtering         │
-│  Dense Vector Search (BGE-M3)                    │
-│  Sparse BM25 Search (PostgreSQL FTS)             │
-│  Reciprocal Rank Fusion (k=60)                   │
-│  Cross-Encoder Reranking (bge-reranker-v2-m3)    │
-│  Sibling Context Expansion                       │
-└────────────────────────┬─────────────────────────┘
-                         │  Queries content & metadata
-                         ▼
-┌──────────────────────────────────────────────────┐
-│               Knowledge Base                     │
-│  Supabase PostgreSQL · pgvector                  │
-│  PDF Documents       · Chunked Embeddings (768d) │
-│  Student Profiles    · Mastery Records           │
-│  Assessment History  · Learning Preferences      │
-└──────────────────────────────────────────────────┘
+```text
+Browser client
+    |
+    v
+FastAPI application
+    |
+    +-- AI Tutor Agent
+    |     lesson flow, conversational teaching, quizzes, evaluation
+    |
+    +-- Retrieval Agent
+    |     vector + full-text retrieval -> RRF -> reranking -> context expansion
+    |
+    +-- PDF processing pipeline
+          extraction -> chunking -> BGE-M3 embeddings -> persistence
+    |
+    v
+Supabase PostgreSQL + pgvector
+    users, subjects, PDFs, chunks, profiles, mastery, assessments
 ```
 
-**Design Principle:** The AI Tutor Agent never directly accesses the database or generates embeddings. The Retrieval Agent never generates explanations or conversational responses. Each component has a single, clearly defined responsibility.
+The tutor agent is responsible for the learning interaction. The retrieval agent is responsible for selecting evidence. Keeping those responsibilities separate makes it possible to improve retrieval without rewriting teaching behavior.
 
----
+## Technology
 
-## Features
+| Area             | Implementation                                         |
+| ---------------- | ------------------------------------------------------ |
+| API              | FastAPI and Uvicorn                                    |
+| Frontend         | Vanilla HTML, CSS, and JavaScript                      |
+| Database         | Supabase PostgreSQL with pgvector and full-text search |
+| Embeddings       | `BAAI/bge-m3` via Sentence Transformers                |
+| Reranking        | `BAAI/bge-reranker-v2-m3` via Transformers             |
+| Tutor model      | Groq `llama-3.3-70b-versatile`                         |
+| Legacy Q&A model | Google Gemini integration                              |
+| PDF extraction   | pdfplumber with PyPDF2 fallback                        |
 
-### Conversational Tutoring
-- Structured lesson delivery following a progressive teaching flow: **Prerequisites → Concept Explanation → Analogy → Worked Example → Comprehension Check**
-- Multi-turn conversational context maintained across the session
-- Strict document grounding — the system refuses to answer from general knowledge when retrieved context is insufficient, citing the limitation explicitly
+The embedding pipeline slices BGE-M3 vectors to 768 dimensions and normalizes them to match the current pgvector schema.
 
-### Advanced Hybrid RAG Pipeline
-- **Dense vector search** using local BAAI/bge-m3 embeddings (1024-dim, normalized to 768-dim) running on GPU
-- **Sparse BM25 search** via PostgreSQL full-text search indexes
-- **Reciprocal Rank Fusion (RRF)** combining dense and sparse candidate rankings (k=60)
-- **Cross-encoder reranking** using local BAAI/bge-reranker-v2-m3 for high-precision passage selection
-- **Sibling context expansion** — retrieves neighboring chunks around top-ranked candidates for coherent context
-
-### Dynamic Assessment & Evaluation
-- MCQ, subjective, and coding question generation calibrated to configurable difficulty levels
-- Batch quiz generation for full assessments across multiple concepts
-- **Rubric-based evaluation** — not binary correct/incorrect grading
-- **Misconception diagnosis** — classifies errors into Foundational, Execution, Logic, and Vocabulary categories
-- Corrective feedback with specific revision topic recommendations
-
-### Student Mastery Tracking
-- Per-concept mastery scores (0.0–1.0) tracked over time with test count and timestamp metadata
-- Mastery scores updated automatically after each quiz evaluation
-- Visual mastery dashboard in the frontend
-
-### PDF Processing Pipeline
-- Drag-and-drop PDF upload with real-time progress tracking
-- Automated text extraction with semantic paragraph chunking (800–1200 characters, 150-character overlap)
-- BGE-M3 embedding generation for all extracted chunks
-- Performance profiling instrumented across extraction, embedding, and database persistence phases
-- File validation (50MB limit, PDF format verification)
-
-### Student Learning Preferences
-- Configurable analogy style (practical, abstract, visual)
-- Adjustable explanation depth (brief, medium, detailed)
-- Preferred coding language for worked examples
-- Preferences stored per-user and injected into tutoring prompts
-
-### Authentication & Data Isolation
-- Session-based authentication with cookie management (register, login, logout, password change)
-- Row-Level Security (RLS) enforcement on Supabase — each user's PDFs, assessments, and profiles are fully isolated
-
-### Legacy Doubt Solver
-- Direct document Q&A endpoint (`/api/v1/ask`) with source-cited responses
-- Strict document-only mode — refuses to generate answers when context is insufficient
-
----
-
-## Tech Stack
-
-| Component | Technology | Details |
-|-----------|-----------|---------|
-| Backend Framework | FastAPI | Async Python web framework |
-| Database | Supabase | PostgreSQL + pgvector + Row-Level Security |
-| Dense Embeddings | BAAI/bge-m3 | Local GPU inference via sentence-transformers |
-| Cross-Encoder Reranker | BAAI/bge-reranker-v2-m3 | Local GPU inference via transformers |
-| LLM (Tutor Agent) | Groq | Llama 3.3 70B Versatile |
-| LLM (Doubt Solver) | Google Gemini | Gemini 1.5 Flash / Pro |
-| Package Manager | uv | Rust-based Python package management (Astral) |
-| Frontend | Vanilla HTML/CSS/JS | Dark-themed UI with glassmorphism design |
-
-**Model Evolution:** The embedding system was migrated from Ollama (`nomic-embed-text`, 768-dim) to Hugging Face BGE-M3 (1024-dim, sliced to 768-dim) for improved retrieval accuracy and multilingual support. The retrieval pipeline was upgraded from naive vector search to a full hybrid RAG system with RRF fusion and cross-encoder reranking.
-
----
-
-## Project Structure
-
-```
-Intel/
-├── AGENTS.md                          # Project specification
-├── README.md
-├── pyproject.toml
-├── requirements.txt
-├── run_server.py                      # Application entry point
-│
-├── api/
-│   └── main.py                        # FastAPI route definitions
-│
-├── core/
-│   ├── simple_auth.py                 # Session-based authentication
-│   └── database/
-│       ├── config.py                  # Supabase connection configuration
-│       ├── manager.py                 # PDFDatabaseManager (all DB operations)
-│       ├── setup.sql                  # Initial database schema
-│       ├── migration_tutor_profiles.sql
-│       ├── migration_user_pdfs.sql
-│       └── run_migrations.py
-│
-├── modules/
-│   ├── agents/
-│   │   ├── retrieval_agent.py         # Hybrid RAG, RRF fusion, cross-encoder reranking
-│   │   └── tutor_agent.py             # Teaching, quiz generation, evaluation
-│   ├── doubt_solver/
-│   │   └── services/                  # Legacy Q&A pipeline
-│   └── pdf_processor/
-│       ├── models/pdf_models.py       # Pydantic data models
-│       └── services/                  # Text extraction, embedding generation
-│
-├── utils/
-│   └── performance_monitor.py         # PDF pipeline profiler
-│
-├── frontend/
-│   ├── index.html / style.css / script.js   # Main application
-│   └── auth.html / auth.css / auth.js       # Authentication pages
-│
-├── tests/
-│   ├── test_retrieval.py              # Retrieval agent integration test
-│   ├── test_verify_tutor.py           # Agent initialization verification
-│   └── check_db.py                    # Database inspection utility
-│
-└── docs/                              # Design documentation (not tracked in git)
-    ├── system_architecture.md
-    ├── implementation.md
-    ├── learning.md
-    └── future_extensions_research.md
-```
-
----
-
-## API Reference
-
-### Authentication
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/auth/register` | Register a new user |
-| `POST` | `/api/v1/auth/login` | Authenticate with email and password |
-| `POST` | `/api/v1/auth/logout` | Terminate current session |
-| `GET` | `/api/v1/auth/profile` | Retrieve authenticated user profile |
-| `POST` | `/api/v1/auth/change-password` | Update password |
-
-### Tutoring
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/tutor/start-lesson` | Begin a structured lesson on a concept |
-| `POST` | `/api/v1/tutor/chat` | Continue conversation during a lesson or doubt-solving turn |
-| `POST` | `/api/v1/tutor/quiz` | Generate quiz questions (MCQ, subjective, coding) |
-| `POST` | `/api/v1/tutor/evaluate` | Submit an answer for rubric-based evaluation |
-
-### Student Profile
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/v1/profile/mastery` | Retrieve mastery scores for all tested concepts |
-| `GET` | `/api/v1/profile/preferences` | Retrieve learning preferences |
-| `POST` | `/api/v1/profile/preferences` | Update learning preferences |
-
-### PDF Management
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/pdfs/upload` | Upload and process a PDF document |
-| `GET` | `/api/v1/pdfs` | List all PDFs for the authenticated user |
-| `GET` | `/api/v1/pdfs/{pdf_id}` | Retrieve details for a specific PDF |
-| `DELETE` | `/api/v1/pdfs/{pdf_id}` | Delete a PDF and its associated chunks |
-| `GET` | `/api/v1/pdfs/stats` | Retrieve PDF processing statistics |
-
-### Legacy Doubt Solver
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/ask` | Submit a document-grounded question |
-| `GET` | `/api/v1/analyze/{question}` | Analyze question intent and complexity |
-
----
-
-## Getting Started
+## Quick start
 
 ### Prerequisites
-- Python 3.11+
-- CUDA-capable GPU (required for local BGE-M3 embeddings and cross-encoder reranking)
-- [Supabase](https://supabase.com) project with the pgvector extension enabled
-- [Groq API Key](https://console.groq.com)
-- [Google Gemini API Key](https://aistudio.google.com/apikey)
 
-### Installation
+- Python 3.14 or later (the version declared in `pyproject.toml`).
+- A Supabase project with the `vector` extension available.
+- A Groq API key for tutor, quiz, and evaluation features.
+- A Gemini API key if using the legacy `/api/v1/ask` doubt-solver flow.
+- Internet access the first time Hugging Face models are downloaded.
 
-```bash
+A CUDA-capable GPU is recommended for faster embedding and reranking. The code falls back to CPU when CUDA is unavailable or runs out of memory.
+
+### Install
+
+```powershell
 git clone https://github.com/Aravind556/Intel.git
-cd Intel
+Set-Location Intel
 
-# Create and activate virtual environment
-uv venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-uv pip install -r requirements.txt
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-### Configuration
+If you use `uv`, install from the project lockfile instead:
 
-Create a `.env` file in the project root:
+```powershell
+uv sync
+```
+
+> The checked-in `pyproject.toml` and `requirements.txt` currently target different dependency sets. For the running FastAPI application, `requirements.txt` is the authoritative installation path until these manifests are consolidated.
+
+## Configuration
+
+Create a `.env` file at the repository root. Never commit real credentials.
 
 ```env
-SUPABASE_URL=<your_supabase_project_url>
-SUPABASE_KEY=<your_supabase_anon_key>
-SUPABASE_SERVICE_KEY=<your_supabase_service_role_key>
-GROQ_API_KEY=<your_groq_api_key>
-GEMINI_API_KEY=<your_gemini_api_key>
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_KEY=<supabase-anon-key>
+SUPABASE_SERVICE_KEY=<supabase-service-role-key>
+GROQ_API_KEY=<groq-api-key>
+GEMINI_API_KEY=<gemini-api-key>
 ```
 
-### Running the Server
+`SUPABASE_SERVICE_KEY` is used by server-side database operations and must only be available to the backend. Keep it out of client code, logs, and version control.
 
-```bash
+## Database setup
+
+1. Create a Supabase project.
+2. Enable the `vector` extension in its SQL editor.
+3. Run [core/database/setup.sql](core/database/setup.sql) to create the base schema, indexes, search functions, and row-level-security policies.
+4. Run the migrations in `core/database/` in their intended order:
+   - `migration_user_pdfs.sql`
+   - `migration_tutor_profiles.sql`
+
+The database stores users, subjects, PDF documents, document chunks, processing status, learner profiles, mastery data, and assessment history. The current schema uses a 768-dimensional vector column.
+
+## Run the application
+
+```powershell
 python run_server.py
 ```
 
-| Resource | URL |
-|----------|-----|
-| Application | http://localhost:8000/frontend |
-| API Documentation | http://localhost:8000/docs |
-| Health Check | http://localhost:8000/health |
+Open:
 
----
+| Resource             | Address                                   |
+| -------------------- | ----------------------------------------- |
+| Sign-in page         | http://localhost:8000/frontend/auth.html  |
+| Application          | http://localhost:8000/frontend/index.html |
+| Interactive API docs | http://localhost:8000/docs                |
+| Health check         | http://localhost:8000/health              |
 
-## Future Extensions
+The server begins serving requests while model initialization continues in a background thread. PDF embedding and reranking features may not be immediately ready on first boot.
 
-The architecture is designed to support the following capabilities without requiring major redesign:
+## API overview
 
-- **Voice Conversations** — Web Speech API for real-time STT with Faster-Whisper server-side fallback
-- **OCR for Scanned PDFs** — Tesseract, EasyOCR, or Surya integration as a fallback in the text extraction pipeline
-- **Diagram Explanation** — Multimodal LLM support for visual content understanding
-- **Knowledge Graphs** — Structured concept relationship mapping across textbooks
-- **Adaptive Revision Planning** — Spaced repetition scheduling based on mastery decay curves
+All routes are mounted under `/api/v1` unless noted. Authentication-protected routes use the `session_id` cookie established by the auth endpoints.
 
----
+| Area                | Endpoints                                                                                          |
+| ------------------- | -------------------------------------------------------------------------------------------------- |
+| Service             | `GET /health`, `GET /system/status`, `GET /stats`                                                  |
+| Authentication      | `POST /auth/register`, `/auth/login`, `/auth/logout`, `/auth/change-password`; `GET /auth/profile` |
+| PDFs                | `POST /pdfs/upload`, `GET /pdfs`, `GET /pdfs/stats`, `GET /pdfs/{pdf_id}`, `DELETE /pdfs/{pdf_id}` |
+| Tutoring            | `POST /tutor/start-lesson`, `/tutor/chat`, `/tutor/quiz`, `/tutor/evaluate`                        |
+| Learner profile     | `GET /profile/mastery`, `GET /profile/preferences`, `POST /profile/preferences`                    |
+| Legacy doubt solver | `POST /ask`, `GET /analyze/{question}`                                                             |
+| Users and subjects  | `POST /users`, `GET /users/{user_id}`, `GET /users/{user_id}/subjects`, `POST /subjects`           |
+
+The generated OpenAPI reference at `/docs` is the source of truth for request and response schemas.
+
+## Repository layout
+
+```text
+.
+|-- api/
+|   `-- main.py                    # FastAPI app, routes, dependencies
+|-- core/
+|   |-- simple_auth.py             # Cookie-session authentication
+|   `-- database/
+|       |-- setup.sql              # Base Supabase schema
+|       |-- migration_*.sql        # Schema migrations
+|       |-- config.py              # Supabase client configuration
+|       `-- manager.py             # Database access layer
+|-- modules/
+|   |-- agents/
+|   |   |-- tutor_agent.py         # Teaching, quizzes, evaluation
+|   |   `-- retrieval_agent.py     # Hybrid evidence retrieval
+|   |-- doubt_solver/              # Legacy document Q&A pipeline
+|   `-- pdf_processor/             # Extraction, chunking, embeddings, storage
+|-- frontend/                      # Browser UI and authentication screens
+|-- tests/                         # Database inspection and test utilities
+|-- docs/
+|   `-- system_architecture.md     # Detailed architecture notes
+|-- run_server.py                  # Local server entry point
+`-- requirements.txt               # Runtime dependency list
+```
+
+## Development notes
+
+- Model artifacts are downloaded on demand by Hugging Face libraries; allow time and disk space for the first run.
+- PDF extraction uses `pdfplumber` first and falls back to `PyPDF2`. Image-only/scanned PDFs need OCR support, which is not yet part of the pipeline.
+- Chunks are generated with a 2,000-character target size and 150-character overlap, subject to the processor's safeguards.
+- Use `tests/check_db.py` for basic database inspection. There is not yet a comprehensive automated test suite.
+- [docs/system_architecture.md](docs/system_architecture.md) contains a deeper technical design reference.
+
+## Production considerations
+
+This repository is suitable for development and prototyping. Before a production deployment, prioritize the following work:
+
+- Replace in-memory sessions with durable, secure session storage; configure secure, HttpOnly, and SameSite cookie attributes.
+- Replace the permissive CORS policy with explicit frontend origins.
+- Confirm that Supabase RLS policies are enabled and tested for every user-owned table.
+- Move PDF processing and model initialization to durable background jobs with retries and observable status.
+- Consolidate `pyproject.toml`, `uv.lock`, and `requirements.txt` into one reproducible dependency strategy.
+- Add integration tests for authentication, isolation, uploads, retrieval quality, and evaluation results.
+- Introduce structured logging, monitoring, rate limiting, error reporting, and a secret-management system.
+
+## Roadmap
+
+- Hierarchical book, unit, chapter, section, and topic metadata.
+- Better prerequisite detection and personalized lesson sequencing.
+- OCR for scanned material and multimodal diagram explanation.
+- Adaptive revision plans based on mastery trends and spaced repetition.
+- Durable user sessions, background processing, and production observability.
+- Broader automated coverage and retrieval-quality evaluation.
 
 ## License
 
-This project is developed as part of the Intel AIoT initiative.
-
-## Contact
-
-For issues or feedback, please open an [issue](https://github.com/Aravind556/Intel/issues).
+No license file is currently included. Add an explicit license before distributing or accepting external contributions.
